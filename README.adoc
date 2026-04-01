@@ -49,6 +49,8 @@ podman run --rm --name antora -v $PWD:/antora -p 8080:8080 -i -t ghcr.io/juliaaa
 
 On SELinux systems, append `:z` to the volume mount.
 
+For a full local showroom experience with a split-pane UI, browser terminal (ttyd), and code editor (code-server), see link:docs/LOCALROOM.md[Localroom].
+
 == Source Material
 
 This course draws from:
