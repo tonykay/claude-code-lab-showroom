@@ -1,0 +1,12 @@
+type: showroom
+default_width: 30
+persist_url_state: true
+view_switcher:
+  enabled: true
+  default_mode: split
+
+tabs:
+  - name: Claude Code Docs
+    url: 'https://code.claude.com/docs'
+  - name: Claude Code Transcripts
+    url: 'https://github.com/simonw/claude-code-transcripts'

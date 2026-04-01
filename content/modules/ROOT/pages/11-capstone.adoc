@@ -1,0 +1,587 @@
+= Capstone: Putting It All Together
+:navtitle: Capstone
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* All 10 modules complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, hooks, skills, the extension model, MCP servers, multi-agent patterns, and the SDK/subprocess model
+* `~/learnpath` project fully built with FastAPI backend, React frontend, MCP server, hooks, skills, CI script, and CLAUDE.md
+* `.claude/settings.json` configured with permission rules, hooks, and skills from Modules 4-7
+====
+
+'''
+
+== Section 1: The Complete Architecture
+
+You have studied every component of Claude Code individually.
+Now see them together.
+
+The following diagram shows the full system -- every subsystem you have learned, and how they connect.
+
+[mermaid]
+....
+graph TB
+    subgraph "User Layer"
+        REPL["Interactive REPL"]
+        Headless["Headless Mode<br/>(claude -p)"]
+        SDKSub["SDK / Subprocess"]
+    end
+
+    subgraph "Agentic Loop"
+        Input["1. User Input"]
+        CtxAssembly["2. Context Assembly"]
+        Reasoning["3. Model Reasoning"]
+        PermCheck["4. Permission Check"]
+        ToolExec["5. Tool Execution"]
+        Continue{"6. Continue?"}
+    end
+
+    subgraph "Context System"
+        SysCtx["System Context<br/>(git status, date, OS)"]
+        CLAUDEmd["CLAUDE.md Hierarchy<br/>(project / user / enterprise)"]
+        GranRules[".claude/rules/<br/>(path-scoped rules)"]
+        SettingsStack["Settings<br/>(5 levels)"]
+        ConvHist["Conversation History"]
+    end
+
+    subgraph "Tool Dispatch"
+        FileTools["File Tools<br/>Read / Edit / Write / Glob"]
+        ShellTools["Shell Tools<br/>Bash"]
+        SearchTools["Search Tools<br/>Grep"]
+        WebTools["Web Tools<br/>Fetch / Search"]
+        AgentTool["Agent Tool<br/>(sub-agents)"]
+        MCPTools["MCP Tools<br/>(external servers)"]
+    end
+
+    subgraph "Permission System"
+        Modes["Permission Modes<br/>(allowlist / default / bypassPermissions)"]
+        PermRules["Permission Rules<br/>(.claude/settings.json)"]
+        BashPat["Bash Pattern Matching<br/>(prefix / regex)"]
+    end
+
+    subgraph "Lifecycle"
+        PreHook["PreToolUse Hooks"]
+        PostHook["PostToolUse Hooks"]
+        NotifHook["Notification Hook"]
+        StopHook["Stop Hook"]
+    end
+
+    subgraph "Extensions"
+        Skills["Custom Skills<br/>(/command triggers)"]
+        Frameworks["Frameworks<br/>(Task, Worktree, Plans)"]
+        MCPServers["MCP Servers<br/>(stdio / sse)"]
+        SubAgents["Sub-Agents<br/>(Agent tool dispatch)"]
+    end
+
+    subgraph "Storage"
+        Sessions["Session Storage<br/>(~/.claude/projects/)"]
+        TodoState["TodoWrite State"]
+    end
+
+    %% User layer to agentic loop
+    REPL --> Input
+    Headless --> Input
+    SDKSub --> Input
+
+    %% Agentic loop flow
+    Input --> CtxAssembly
+    CtxAssembly --> Reasoning
+    Reasoning --> PermCheck
+    PermCheck --> ToolExec
+    ToolExec --> Continue
+    Continue -->|"More work needed"| Reasoning
+    Continue -->|"Task complete"| Sessions
+
+    %% Context assembly sources
+    SysCtx --> CtxAssembly
+    CLAUDEmd --> CtxAssembly
+    GranRules --> CtxAssembly
+    SettingsStack --> CtxAssembly
+    ConvHist --> CtxAssembly
+
+    %% Tool dispatch
+    Reasoning --> FileTools
+    Reasoning --> ShellTools
+    Reasoning --> SearchTools
+    Reasoning --> WebTools
+    Reasoning --> AgentTool
+    Reasoning --> MCPTools
+
+    %% Permission system
+    PermRules --> PermCheck
+    Modes --> PermCheck
+    BashPat --> PermCheck
+
+    %% Lifecycle hooks
+    PreHook --> ToolExec
+    ToolExec --> PostHook
+
+    %% Extensions feed into the loop
+    Skills --> CtxAssembly
+    MCPServers --> MCPTools
+    SubAgents --> AgentTool
+
+    style REPL fill:#e8f4f8,stroke:#2c3e50
+    style Headless fill:#e8f4f8,stroke:#2c3e50
+    style SDKSub fill:#e8f4f8,stroke:#2c3e50
+    style Reasoning fill:#fef9e7,stroke:#2c3e50
+    style PermCheck fill:#fadbd8,stroke:#2c3e50
+    style ToolExec fill:#d5f5e3,stroke:#2c3e50
+    style Continue fill:#f9e79f,stroke:#2c3e50
+....
+
+=== Narrative Walkthrough: A Single Prompt Through the Entire System
+
+To make this concrete, trace a single prompt through every subsystem.
+
+The user types into an interactive session:
+
+[source,text]
+----
+add a search endpoint to the learnpath API
+----
+
+==== Step 1: User Input
+
+The REPL captures the prompt string and passes it to the agentic loop.
+The loop begins its first iteration.
+
+==== Step 2: Context Assembly
+
+Before the model sees the prompt, Claude Code assembles the full context window:
+
+1. **System context** is collected: the current date, the operating system, the git repository status of `~/learnpath` (current branch, modified files, recent commits).
+
+2. **CLAUDE.md hierarchy** is loaded. The loader walks up the directory tree:
+   - `~/learnpath/CLAUDE.md` -- project conventions: "Use Pydantic V2 for all models. Use `uv run` for all Python commands. FastAPI app is in `src/`. Tests are in `tests/`."
+   - `~/CLAUDE.md` -- user-level defaults (if any).
+   - Each file is loaded in order. Project-level instructions take precedence for project-specific behavior.
+
+3. **Granular rules** in `~/learnpath/.claude/rules/` are evaluated. Rules with path globs are matched against the likely working files. A rule like `api-endpoints.md` scoped to `src/routes/**` activates because the prompt mentions "API." It injects: "All route handlers must include response_model. Use async def. Include docstrings."
+
+4. **Settings** are loaded from the 5-level hierarchy: enterprise, managed organization, project (`.claude/settings.json`), user (`~/.claude/settings.json`), and inline overrides.
+
+5. **Conversation history** from the current session is included (in this case, empty -- it is a new session).
+
+6. **Skills** are scanned. The `/api:scaffold-endpoint` skill description mentions "scaffold endpoint" -- Claude now has this skill's instructions available in context if it decides the skill is relevant.
+
+All of this is packed into the context window before the model reasons about a single token.
+
+==== Step 3: Model Reasoning (Iteration 1)
+
+The model receives the assembled context and the user prompt.
+It reasons:
+
+- The project is a FastAPI application in `src/`.
+- A search endpoint needs to be added.
+- First, it needs to understand the existing route structure.
+- **Tool selection:** Read existing route files to understand the pattern before writing new code.
+
+The model emits a tool call: `Read` on `src/routes/learnpaths.py`.
+
+==== Step 4: Permission Check (Iteration 1)
+
+The permission system evaluates the `Read` tool call:
+
+- `Read` is in the default allowlist -- file reading is always permitted.
+- No permission rules in `.claude/settings.json` restrict file reads.
+- No `PreToolUse` hook is configured for `Read`.
+- **Result:** Allowed. No user prompt needed.
+
+==== Step 5: Tool Execution (Iteration 1)
+
+The `Read` tool executes, returning the contents of `src/routes/learnpaths.py`.
+The result is appended to the conversation as a tool result message.
+
+If a `PostToolUse` hook is configured for `Read`, it runs now.
+In the learnpath project, the formatting hook that runs `ruff format` is scoped to `Write` and `Edit`, so it does not fire here.
+
+==== Step 6: Continue? (Iteration 1)
+
+The model has the file contents but has not completed the task.
+It decides to continue.
+
+==== Iteration 2: Read the Model
+
+The model reasons that it needs to see the Pydantic models to understand the data shape.
+It emits `Read` on `src/models/learnpath.py`.
+Permission check passes (same as before).
+The model now has both the route patterns and the data models.
+
+==== Iteration 3: Write the Search Endpoint
+
+The model reasons it has enough context to write the new endpoint.
+It emits an `Edit` tool call on `src/routes/learnpaths.py`, inserting a new `search_learnpaths` function with query parameters, Pydantic response model, and async implementation.
+
+**Permission check:** `Edit` on a file under `src/` -- the project settings allow edits to `src/**` files. Allowed.
+
+**PreToolUse hook:** If a pre-edit hook is configured (e.g., to check that the target file is not locked), it runs before the edit executes.
+
+**Tool execution:** The edit is applied to the file.
+
+**PostToolUse hook:** The `ruff format` hook fires. It runs `uv run ruff format src/routes/learnpaths.py` and returns the formatted result. The hook's exit code determines whether the edit stands or is flagged.
+
+==== Iteration 4: Write a Test
+
+The model reasons that the project conventions (from CLAUDE.md) require tests for new endpoints.
+It emits a `Write` tool call to create `tests/test_search.py`.
+
+**Permission check:** `Write` to `tests/**` -- allowed by settings.
+
+**PostToolUse hook:** The formatter runs on the new test file.
+
+==== Iteration 5: Run the Tests
+
+The model emits a `Bash` tool call: `uv run pytest tests/test_search.py -v`.
+
+**Permission check:** `Bash` tool calls go through pattern matching. The settings include an allow rule for `uv run pytest*`. The command matches. Allowed without prompting the user.
+
+**Tool execution:** The tests run. Results are captured.
+
+==== Iteration 6: Evaluate and Respond
+
+The model sees all tests passing.
+It decides the task is complete and generates a summary response for the user.
+
+**Session storage:** The entire conversation -- all 6 iterations, all tool calls and results -- is written to `~/.claude/projects/` under the project's session directory with a unique session ID.
+
+==== What Did Not Fire (and Why)
+
+- **MCP tools** were not needed -- no external data source was required.
+- **Sub-agents** were not spawned -- the task was small enough for a single agent.
+- **The `/api:scaffold-endpoint` skill** was available in context but the model chose to write the code directly rather than invoking the skill, because the existing patterns were clear enough.
+- **Notification hooks** did not fire because the session did not meet the configured notification conditions.
+
+This is the complete picture: context assembly, tool selection, permission evaluation, hook execution, iteration, and session storage -- all for a single prompt.
+
+'''
+
+== Section 2: What You Built
+
+Over 10 modules, you constructed a full-stack application and a comprehensive Claude Code configuration around it.
+
+=== Application: Personal Learning Path Manager
+
+[cols="1,3",options="header"]
+|===
+|Component |Details
+
+|FastAPI Backend
+|CRUD endpoints for learning paths with pagination, filtering, and the search endpoint you just traced through
+
+|Pydantic V2 Models
+|`LearnPath`, `LearnPathCreate`, `LearnPathUpdate` with field validation, custom validators, and response models
+
+|PostgreSQL Persistence
+|Database layer with SQLAlchemy async, connection pooling, and migration support
+
+|Asset Tagging
+|Many-to-many relationship between learning paths and tags, with tag-based filtering
+
+|React TypeScript Frontend
+|Component-based UI consuming the FastAPI backend, with type-safe API client
+
+|Test Suite
+|pytest tests covering API endpoints, model validation, database operations, and integration flows
+|===
+
+=== Claude Code Configuration
+
+[cols="1,3",options="header"]
+|===
+|Configuration |What It Does
+
+|`CLAUDE.md`
+|Project conventions: Python version, package manager (`uv`), project structure, coding standards, build and test commands
+
+|`.claude/settings.json`
+|Permission rules (allow `uv run pytest*`, allow edits to `src/**` and `tests/**`), hooks (format on write, lint on edit), and MCP server registration
+
+|`.claude/rules/`
+|Path-scoped granular rules: API endpoint conventions for `src/routes/**`, model validation rules for `src/models/**`, test conventions for `tests/**`
+
+|Custom Skills
+|`/db:migrate` for database migrations, `/api:scaffold-endpoint` for new endpoint scaffolding, `/test:coverage` for coverage analysis
+
+|MCP Server
+|RSS feed ingestion server for importing learning resources from external feeds
+
+|CI Script
+|`scripts/ci_check.py` -- headless automation using the subprocess model to run tests, check quality, and generate reports
+|===
+
+=== Project Structure
+
+[source,text]
+----
+~/learnpath/
+├── CLAUDE.md                          # Project conventions
+├── pyproject.toml                     # Python project config (uv)
+├── .claude/
+│   ├── settings.json                  # Permissions, hooks, MCP servers
+│   ├── rules/
+│   │   ├── api-endpoints.md           # Rules for src/routes/**
+│   │   ├── models.md                  # Rules for src/models/**
+│   │   └── tests.md                   # Rules for tests/**
+│   └── skills/
+│       ├── db-migrate.md              # /db:migrate skill
+│       ├── api-scaffold-endpoint.md   # /api:scaffold-endpoint skill
+│       └── test-coverage.md           # /test:coverage skill
+├── src/
+│   ├── main.py                        # FastAPI application entry
+│   ├── config.py                      # Configuration management
+│   ├── database.py                    # Database connection and session
+│   ├── models/
+│   │   ├── learnpath.py               # Pydantic + SQLAlchemy models
+│   │   └── tag.py                     # Tag model (many-to-many)
+│   └── routes/
+│       ├── learnpaths.py              # CRUD + search endpoints
+│       └── tags.py                    # Tag management endpoints
+├── tests/
+│   ├── conftest.py                    # Fixtures and test database
+│   ├── test_learnpaths.py             # Endpoint tests
+│   ├── test_models.py                 # Model validation tests
+│   ├── test_search.py                 # Search endpoint tests
+│   └── test_tags.py                   # Tag relationship tests
+├── mcp-servers/
+│   └── rss-ingest/                    # MCP server for RSS feed import
+│       ├── server.py
+│       └── requirements.txt
+├── scripts/
+│   └── ci_check.py                    # CI automation (Module 10)
+└── frontend/
+    ├── package.json
+    ├── src/
+    │   ├── App.tsx
+    │   ├── api/
+    │   │   └── client.ts              # Type-safe API client
+    │   └── components/
+    │       ├── LearnPathList.tsx
+    │       ├── LearnPathForm.tsx
+    │       └── TagFilter.tsx
+    └── tsconfig.json
+----
+
+This is not a toy project.
+It is a working full-stack application with a production-grade Claude Code configuration.
+
+'''
+
+== Section 3: Architecture Retrospective
+
+Every module taught one architectural concept and built one thing with it.
+Here is the complete map:
+
+[cols="1,2,2,2,3",options="header"]
+|===
+|Module |Concept |Component |What You Built |Key Insight
+
+|1. The Agentic Loop
+|Continuous reasoning-action cycle
+|The six-step loop (input, context, reasoning, permission, execution, continue)
+|Scaffolded the FastAPI project by watching Claude iterate through multiple tool calls
+|Claude Code is not request-response -- it is an autonomous loop that decides when it is done.
+
+|2. Context & Memory
+|Context window assembly pipeline
+|CLAUDE.md hierarchy, system context, conversation history
+|Created `CLAUDE.md` with project conventions that Claude follows automatically
+|Context is not magic -- it is a deterministic assembly pipeline you can inspect and control.
+
+|3. Tools & Tool Dispatch
+|Tool selection and execution model
+|File tools, Bash, Grep, Glob, web tools
+|Built CRUD endpoints by understanding why Claude picks specific tools for each subtask
+|Tool selection is a model decision informed by context -- not hardcoded routing.
+
+|4. Permissions & Trust
+|Security boundary enforcement
+|Permission modes, rules, bash pattern matching
+|Configured `.claude/settings.json` with allowlists for safe commands
+|Permissions are the only hard boundary between Claude's intent and system execution.
+
+|5. Hooks & Lifecycle
+|Event-driven automation at tool boundaries
+|PreToolUse, PostToolUse, Notification, Stop hooks
+|Added auto-formatting and linting hooks that run on every file write
+|Hooks inject deterministic behavior into an otherwise non-deterministic system.
+
+|6. Skills & Workflows
+|Reusable prompt-driven capabilities
+|Skill files in `.claude/skills/`, slash command triggers
+|Created `/db:migrate`, `/api:scaffold-endpoint`, and `/test:coverage` skills
+|Skills encode expert knowledge as context that Claude can activate on demand.
+
+|7. Extending Claude Code
+|Framework composition patterns
+|Task management, worktrees, plan-driven development
+|Used structured workflows to manage a multi-step feature implementation
+|Extensions compose -- each one adds a capability without breaking the others.
+
+|8. MCP Servers
+|External tool integration via protocol
+|MCP server registration, stdio/SSE transport, tool exposure
+|Built an RSS feed ingestion MCP server that Claude can call like any other tool
+|MCP makes any external system a first-class Claude Code tool with a single protocol.
+
+|9. Multi-Agent Patterns
+|Parallel and hierarchical agent orchestration
+|Agent tool, sub-agent spawning, context isolation
+|Used sub-agents for parallel file analysis with isolated context windows
+|Sub-agents trade context for parallelism -- each one sees only what it needs.
+
+|10. SDK & Integration
+|Programmatic control via subprocess model
+|Headless mode, JSON output, session management
+|Built a CI automation script that invokes Claude Code as a subprocess
+|There is no separate "SDK version" -- the interactive CLI and the subprocess API are the same binary, the same loop.
+|===
+
+'''
+
+== Section 4: Final Transcript Deep Dive
+
+=== Exercise: Then vs Now
+
+This exercise measures how far your understanding has come.
+
+1. **Find your Module 1 transcript.** Locate the session where you first scaffolded the learnpath project. If you used `claude-code-transcripts` to save it, find it in `~/.claude/projects/`. If not, start a new session and ask Claude to scaffold a simple Python project -- you will get a fresh transcript to analyze.
+
+2. **Find your Module 10 transcript.** Locate the session where you ran `ci_check.py` or any headless invocation from Module 10.
+
+3. **Compare them side by side.** Answer these questions:
+
+[cols="1,3",options="header"]
+|===
+|Question |What to Look For
+
+|How many tool calls did each session make?
+|Count the `tool_use` messages in each transcript. Module 1 likely has 5-10 tool calls (read, write, bash). Module 10's headless invocations each have fewer calls but there are multiple independent sessions.
+
+|What tools were used in each?
+|Module 1 probably used Write, Bash, and maybe Read. Module 10 used Bash heavily (running commands) with structured JSON output. Did the tool mix change?
+
+|Can you identify the permission evaluation in each?
+|In Module 1, you likely saw interactive permission prompts (before you configured allowlists). In Module 10, permissions were evaluated silently against `.claude/settings.json`. Can you find the difference in the transcript structure?
+
+|Were hooks firing in Module 10 that did not exist in Module 1?
+|Module 1 had no hooks. Module 10 should show hook execution in the transcript -- look for `PreToolUse` or `PostToolUse` entries or their effects (auto-formatted files, lint results).
+
+|How has your ability to read these transcripts changed?
+|In Module 1, the transcript was probably opaque -- a wall of JSON. Now you should be able to identify every step of the agentic loop, label each tool call, and explain why each decision was made.
+|===
+
+=== Exercise: Trace the Architecture
+
+This is the final test.
+Pick any recent Claude Code session transcript -- ideally one where Claude did something non-trivial (more than 3 tool calls).
+
+Without referring back to any module, annotate the transcript:
+
+1. **Mark each step of the agentic loop.** Label the user input, context assembly (you will not see this directly, but you can infer it from what Claude knows), model reasoning (the assistant messages before tool calls), permission checks (any prompts or silent approvals), tool execution (tool results), and the continue/stop decision.
+
+2. **Identify context assembly.** What did Claude know that it could only know from CLAUDE.md? From system context? From conversation history? From granular rules?
+
+3. **Label each tool call with its dispatch reason.** Why did Claude pick `Read` instead of `Grep`? Why `Bash` instead of `Edit`? The model's reasoning (in the assistant message before the tool call) usually explains this.
+
+4. **Note any permission evaluations.** Were you prompted? If not, which rule in `.claude/settings.json` allowed the tool call silently?
+
+5. **Find hook executions.** Look for side effects that were not requested by Claude -- auto-formatting, lint output, notification triggers.
+
+6. **Spot any MCP tool calls.** MCP tools appear in the tool list with a server prefix (e.g., `mcp__rss__fetch_feed`). Did Claude use any? If not, why not?
+
+If you can do this -- annotate a raw transcript with architectural labels for every component -- you have deep understanding of Claude Code's internals.
+That understanding is not common.
+Most users treat Claude Code as a black box.
+You can now read the box.
+
+'''
+
+== Section 5: Where to Go Next
+
+=== Contributing to the Ecosystem
+
+You have built skills, an MCP server, and a CI integration.
+These are not just course exercises -- they are the building blocks of the Claude Code ecosystem.
+
+* **Publish your skills.** Skills are markdown files. They can be shared in a git repository, contributed to community skill collections, or distributed within your organization.
+* **Publish your MCP server.** The RSS ingestion server you built follows the same protocol as every MCP server. Package it, document it, and others can register it in their `.claude/settings.json`.
+* **Contribute to open source tooling.** The `claude-code-transcripts` tool, community skill repos, and MCP server registries all accept contributions.
+
+=== Advanced Patterns Not Covered
+
+This course covered the core architecture.
+There are patterns beyond it:
+
+* **Enterprise managed settings** -- organization-wide configuration pushed to all developer machines, overriding project and user settings.
+* **Multi-tenant configurations** -- running Claude Code across multiple projects with shared and project-specific settings.
+* **Custom agent types** -- building specialized agents that extend Claude's Agent tool with domain-specific behavior.
+* **API-driven workflows** -- integrating Claude Code invocations into larger systems via REST APIs, webhooks, and event-driven architectures.
+* **Model routing** -- selecting different Claude models for different tasks based on cost, latency, or capability requirements.
+
+=== Staying Current
+
+Claude Code evolves rapidly.
+Features are added, defaults change, and new extension points appear.
+
+* **Official documentation:** {claude-code-docs-url}[code.claude.com/docs] -- the primary reference. Check it regularly.
+* **Changelog:** Claude Code publishes release notes with each update. Read them to understand what changed and why.
+* **Community resources:** GitHub discussions, Discord channels, and blog posts from practitioners who push Claude Code into new territory.
+
+The architectural understanding you have now -- the agentic loop, context assembly, permission model, extension points -- is stable.
+Specific flags and features may change, but the core architecture evolves slowly.
+When a new feature appears, you can place it in the architecture: "This is a new hook event," or "This is a new tool in the dispatch table," or "This is a new level in the settings hierarchy."
+That is the value of understanding the system rather than memorizing the surface.
+
+=== Community
+
+* **GitHub:** Claude Code's issue tracker and discussion forums are where feature requests, bug reports, and architectural discussions happen.
+* **Discord:** Real-time conversation with other Claude Code users, from beginners to power users.
+* **Community skill repositories:** Collections of skills and MCP servers built by other users. Browse them for ideas, contribute your own.
+
+'''
+
+== Closing
+
+You started this course knowing how to use Claude Code.
+You now know how it works.
+
+That understanding -- the agentic loop, the context assembly pipeline, the permission model, the extension architecture -- gives you leverage that documentation alone cannot provide.
+
+You can debug Claude Code's behavior by understanding its mechanisms.
+When Claude makes an unexpected tool choice, you know to check the context assembly -- what did it see in CLAUDE.md, in the granular rules, in the conversation history?
+When a permission prompt appears unexpectedly, you know to check the settings hierarchy and the bash pattern matching rules.
+When a hook does not fire, you know to check the event type, the tool match pattern, and the hook's exit code behavior.
+
+You can extend Claude Code because you know its extension points.
+Skills are context injection.
+Hooks are lifecycle interception.
+MCP servers are tool dispatch expansion.
+Sub-agents are context isolation with parallel execution.
+The SDK is the same loop, accessed programmatically.
+Each extension point has a clear contract, and you know where each one sits in the architecture.
+
+You can teach others because you have the mental model.
+When someone asks "why did Claude do that?" you can trace the answer through the architecture: context assembly determined what Claude knew, tool dispatch determined what it could do, permissions determined what it was allowed to do, and the agentic loop determined when it stopped.
+
+Welcome to the other side of the curtain.
+
+'''
+
+== References
+
+These are the primary sources used across all modules of this course:
+
+* {claude-code-docs-url}[Claude Code Official Documentation] -- the canonical reference for all features, flags, and configuration options
+* {claude-code-docs-url}/reference/hooks[Hooks Reference] -- event types, configuration, and hook execution model
+* {claude-code-docs-url}/reference/sdk/overview[SDK Overview] -- subprocess model, output formats, and programmatic control
+* {claude-code-docs-url}/reference/commands/cli-flags[CLI Flags Reference] -- complete list of command-line options
+* {claude-code-docs-url}/reference/permissions[Permissions Reference] -- permission modes, rules, and bash pattern matching
+* {claude-code-transcripts-url}[claude-code-transcripts] -- Simon Willison's tool for extracting and analyzing Claude Code session transcripts
+* {claude-howto-url}[claude-howto] -- community-maintained collection of Claude Code patterns and techniques
+* {claude-code-tips-url}[claude-code-tips] -- practical tips and workflows from experienced Claude Code users
+* https://modelcontextprotocol.io[Model Context Protocol Specification] -- the MCP standard for tool integration
+* https://docs.astral.sh/uv/[uv Documentation] -- the Python package manager used throughout this course
+* https://docs.pydantic.dev/latest/[Pydantic V2 Documentation] -- data validation and serialization
+* https://fastapi.tiangolo.com/[FastAPI Documentation] -- the web framework used in the learnpath project

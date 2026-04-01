@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How It Works - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="how-it-works.html" class="active">How It Works</a>
+  <a href="memory-context.html">Memory &amp; Context</a>
+  <a href="permissions.html">Permissions</a>
+  <a href="tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../guides/authentication.html">Authentication</a>
+  <a href="../guides/hooks.html">Hooks</a>
+  <a href="../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Concepts / How It Works</div>
+  </div>
+  <div class="content">
+
+<h1>How It Works</h1>
+<p class="page-desc">Claude Code operates as a terminal-based coding agent that executes a continuous agentic loop.</p>
+
+<h2>The Agentic Loop</h2>
+<p>A six-step cycle:</p>
+<ol>
+  <li><strong>User Input</strong> &mdash; Messages entered interactively or via stdin/flags</li>
+  <li><strong>Context Assembly</strong> &mdash; System prompt built with git status, date, memory files, and available tools</li>
+  <li><strong>Model Reasoning</strong> &mdash; Claude analyzes the task and selects appropriate tools</li>
+  <li><strong>Permission Evaluation</strong> &mdash; Tools checked against current permission mode before execution</li>
+  <li><strong>Tool Execution</strong> &mdash; Approved tools run and return results to the conversation</li>
+  <li><strong>Loop Continuation</strong> &mdash; Model receives results and either calls more tools or finalizes response</li>
+</ol>
+<blockquote>The loop runs entirely in your terminal process &mdash; with no remote execution.</blockquote>
+
+<h2>Context Loading</h2>
+<p>Two context blocks prepended to every API call:</p>
+<ul>
+  <li><strong>System Context:</strong> git info (branch, commits, status) and cache-breaking injections, skipped in remote mode</li>
+  <li><strong>User Context:</strong> CLAUDE.md memory files (4-level hierarchy) and current date. Both memoized.</li>
+</ul>
+
+<h2>Tool Permissions</h2>
+<p>Each tool has a <code>checkPermissions</code> method returning one of: <strong>allow</strong> (runs immediately), <strong>ask</strong> (prompts user), or <strong>deny</strong> (rejected with error).</p>
+
+<h2>Operating Modes</h2>
+<p>Interactive REPL with live terminal UI or non-interactive print mode for automation. Sub-agents via Task tool.</p>
+
+<h2>Storage and Resumption</h2>
+<p>JSON transcripts with unique session IDs. Long conversations compacted automatically.</p>
+
+<div class="page-nav">
+  <a href="../installation.html" class="prev"><span class="label">Previous</span><span class="title">Installation</span></a>
+  <a href="memory-context.html" class="next"><span class="label">Next</span><span class="title">Memory &amp; Context</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

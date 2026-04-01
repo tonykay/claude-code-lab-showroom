@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hooks Reference - Claude Code Documentation</title>
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../../index.html">Introduction</a>
+  <a href="../../quickstart.html">Quickstart</a>
+  <a href="../../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../../concepts/how-it-works.html">How It Works</a>
+  <a href="../../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../../concepts/permissions.html">Permissions</a>
+  <a href="../../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../../guides/authentication.html">Authentication</a>
+  <a href="../../guides/hooks.html">Hooks</a>
+  <a href="../../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../commands/overview.html">Overview</a>
+  <a href="../commands/cli-flags.html">CLI Flags</a>
+  <a href="../commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../tools/bash.html">Bash</a>
+  <a href="../tools/file-operations.html">File Operations</a>
+  <a href="../tools/search.html">Search</a>
+  <a href="../tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="overview.html">Overview</a>
+  <a href="hooks-reference.html" class="active">Hooks Reference</a>
+  <a href="permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Reference / SDK / Hooks Reference</div>
+  </div>
+  <div class="content">
+
+<h1>Hooks Reference</h1>
+<p class="page-desc">Detailed reference for hooks: commands, endpoints, prompts, and callbacks at lifecycle events.</p>
+
+<h2>Configuration</h2>
+<p>Settings files under the <code>hooks</code> key. Each has event type, optional matcher, and hook definitions.</p>
+
+<h2>Hook Types</h2>
+<table>
+  <thead><tr><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>Command</td><td>Shell command (bash/PowerShell)</td></tr>
+    <tr><td>Prompt</td><td>LLM-based decision</td></tr>
+    <tr><td>Agent</td><td>Agentic loop with tool access</td></tr>
+    <tr><td>HTTP</td><td>POST to endpoint</td></tr>
+  </tbody>
+</table>
+
+<h2>Events</h2>
+<table>
+  <thead><tr><th>Event</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>PreToolUse</code></td><td>Before tool execution</td></tr>
+    <tr><td><code>PostToolUse</code></td><td>After tool execution</td></tr>
+    <tr><td><code>PermissionRequest</code></td><td>Permission requested</td></tr>
+    <tr><td><code>PermissionDenied</code></td><td>Permission denied</td></tr>
+    <tr><td><code>Stop</code></td><td>Before conclusion</td></tr>
+    <tr><td><code>StopFailure</code></td><td>Stop failed</td></tr>
+    <tr><td><code>SessionStart</code></td><td>Session beginning</td></tr>
+    <tr><td><code>SessionEnd</code></td><td>Session ending</td></tr>
+    <tr><td><code>SubagentStart</code></td><td>Sub-agent launched</td></tr>
+    <tr><td><code>SubagentStop</code></td><td>Sub-agent finished</td></tr>
+    <tr><td><code>FileChanged</code></td><td>File modified</td></tr>
+    <tr><td><code>CwdChanged</code></td><td>Working directory changed</td></tr>
+    <tr><td><code>ConfigChange</code></td><td>Configuration changed</td></tr>
+  </tbody>
+</table>
+
+<h2>Exit Codes</h2>
+<ul>
+  <li><strong>0</strong> = success</li>
+  <li><strong>2</strong> = block/special behavior</li>
+  <li><strong>other</strong> = error without blocking</li>
+</ul>
+
+<h2>Async Hooks</h2>
+<p>Return <code>{"async": true}</code> for non-blocking background execution.</p>
+
+<div class="page-nav">
+  <a href="overview.html" class="prev"><span class="label">Previous</span><span class="title">Overview</span></a>
+  <a href="permissions-api.html" class="next"><span class="label">Next</span><span class="title">Permissions API</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

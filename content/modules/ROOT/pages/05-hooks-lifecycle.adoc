@@ -1,0 +1,815 @@
+= Module 5: Hooks & Lifecycle
+:navtitle: Hooks & Lifecycle
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-4 complete -- you understand the agentic loop, context assembly, tool dispatch, and permission rules
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, and CRUD API endpoints
+* `CLAUDE.md` and `.claude/settings.json` configured with permission rules from Module 4
+====
+
+'''
+
+== Part 1: How It Works
+
+In Module 4 you learned how permissions control *whether* a tool call executes.
+Hooks control *what happens around* tool calls and other lifecycle events -- before them, after them, and at boundaries like session start and stop.
+
+Permissions are gatekeepers.
+Hooks are event handlers.
+
+Together they give you fine-grained control over Claude Code's behavior without modifying Claude Code itself.
+
+=== The Event Lifecycle
+
+Every Claude Code session follows a lifecycle with well-defined events.
+Hooks attach to these events to run custom logic at each stage.
+
+[mermaid]
+....
+flowchart TD
+    A["SessionStart"] --> B["UserPromptSubmit"]
+    B --> C["Model Reasoning"]
+    C --> D["PreToolUse"]
+    D --> E["Tool Executes"]
+    E --> F["PostToolUse"]
+    F --> G{"More tools?"}
+    G -->|yes| D
+    G -->|no| H["Stop"]
+    H --> I{"Exit 2?"}
+    I -->|yes — keep working| C
+    I -->|no — done| J["Session Ends"]
+
+    K["FileChanged"] -.->|"orthogonal monitor"| C
+
+    style A fill:#d4e6f1,stroke:#2980b9
+    style H fill:#f9e79f,stroke:#f39c12
+    style D fill:#d5f5e3,stroke:#27ae60
+    style F fill:#d5f5e3,stroke:#27ae60
+    style K fill:#fadbd8,stroke:#e74c3c
+....
+
+The key insight: `PreToolUse` and `PostToolUse` fire for *every* tool call inside the loop.
+If Claude Code makes 15 tool calls to complete a task, those hooks fire 15 times each.
+`SessionStart` and `Stop` fire once.
+`FileChanged` is orthogonal -- it monitors file patterns independently and fires whenever an external process modifies a watched file.
+
+=== Six Event Types
+
+[cols="1,2,2,2",options="header"]
+|===
+|Event |When It Fires |Exit 2 Behavior |Common Use
+
+|`PreToolUse`
+|Before a tool call executes
+|Blocks the tool call -- Claude sees the block and adapts
+|Prevent specific operations, inject validation, log tool calls
+
+|`PostToolUse`
+|After a tool call completes successfully
+|Injects output into the conversation (Claude sees the hook's stdout)
+|Auto-format code, run linters, post-processing
+
+|`Stop`
+|Before Claude concludes its turn and returns control to you
+|Forces Claude to continue working (the conversation does not end)
+|Enforce quality gates: tests must pass, linting must be clean
+
+|`SessionStart`
+|At the beginning of a new session
+|Injects output into the conversation as initial context
+|Set environment variables, load project context, display banners
+
+|`UserPromptSubmit`
+|When you submit a prompt (before Claude processes it)
+|Blocks the prompt submission -- Claude never sees it
+|Input validation, prompt logging, content filtering
+
+|`FileChanged`
+|When a file matching a pattern is modified by an external process
+|Not applicable (fires as a notification)
+|Auto-run tests when source files change, reload configuration
+|===
+
+[TIP]
+====
+The most powerful event type for day-to-day work is `Stop` with exit code 2.
+It turns Claude Code into a self-correcting agent: "do not stop until the tests pass."
+====
+
+=== Four Hook Types
+
+Hooks are not limited to shell commands.
+Claude Code supports four hook types, each suited to different scenarios.
+
+[cols="1,2,2",options="header"]
+|===
+|Type |How It Works |When to Use
+
+|*Shell command*
+|Runs a bash (or PowerShell on Windows) command with a configurable timeout.
+Receives the hook payload via `$CLAUDE_HOOK_PAYLOAD` environment variable.
+|Most hooks. Formatting, linting, testing, logging, file manipulation.
+
+|*HTTP request*
+|Sends a POST request to a URL with the hook payload as the JSON body.
+|External integrations: Slack notifications, CI triggers, audit logging to a remote service.
+
+|*LLM prompt*
+|Sends a prompt to Claude for decision-making.
+Claude evaluates the context and returns a judgment.
+|Policy enforcement where rules are too nuanced for simple pattern matching.
+Example: "Should this database migration be allowed given the current schema state?"
+
+|*Agent hook*
+|Launches a full Claude Code agent with tool access.
+The agent can read files, run commands, and make decisions.
+|Complex validation workflows that require multi-step reasoning.
+Example: "Review the diff, run the affected tests, and block if coverage drops."
+|===
+
+For this course, you will work exclusively with shell command hooks.
+They cover the vast majority of real-world use cases and are the simplest to understand and debug.
+
+=== Exit Code Semantics
+
+Exit codes are how hooks communicate their result back to Claude Code.
+There are exactly three cases.
+
+* *Exit 0* -- success. The hook ran, everything is fine, proceed normally.
+* *Exit 2* -- block or inject. The specific behavior depends on the event type (see the table above). For `PreToolUse` it blocks the tool call. For `Stop` it forces Claude to continue. For `PostToolUse` and `SessionStart` it injects the hook's stdout into the conversation.
+* *Any other exit code* -- error. The error is shown to the user but does not block execution.
+
+[mermaid]
+....
+flowchart TD
+    A["Hook executes"] --> B{"Exit code?"}
+    B -->|"0"| C["Success — proceed normally"]
+    B -->|"2"| D{"Event type?"}
+    B -->|"other"| E["Error — shown to user"]
+    D -->|"PreToolUse"| F["Block the tool call"]
+    D -->|"PostToolUse"| G["Inject stdout into conversation"]
+    D -->|"Stop"| H["Force Claude to continue"]
+    D -->|"SessionStart"| I["Inject stdout as context"]
+    D -->|"UserPromptSubmit"| J["Block the prompt"]
+    D -->|"FileChanged"| K["N/A"]
+
+    style C fill:#d5f5e3,stroke:#27ae60
+    style E fill:#fadbd8,stroke:#e74c3c
+    style F fill:#f9e79f,stroke:#f39c12
+    style G fill:#f9e79f,stroke:#f39c12
+    style H fill:#f9e79f,stroke:#f39c12
+    style I fill:#f9e79f,stroke:#f39c12
+    style J fill:#f9e79f,stroke:#f39c12
+....
+
+[IMPORTANT]
+====
+Exit code 2 is the *only* non-zero exit code that triggers special behavior.
+Exit code 1, 3, 127, or any other value is treated as an error.
+If your hook script fails because of a missing command (exit 127) or a syntax error (exit 1), Claude Code treats it as a hook error, not as a block signal.
+Always use `exit 2` explicitly when you want to block or inject.
+====
+
+=== Hook Configuration
+
+Hooks are configured in the same settings files as permissions, under the `hooks` key.
+They follow the same priority hierarchy:
+
+[cols="1,2",options="header"]
+|===
+|Source |Location
+
+|User (global)
+|`~/.claude/settings.json`
+
+|Project (committed, shared)
+|`.claude/settings.json` in the project directory
+
+|Local (user-specific, not committed)
+|`.claude/settings.local.json` in the project directory
+|===
+
+You can also configure hooks interactively using the `/hooks` slash command inside a Claude Code session.
+This opens a guided interface for creating and editing hooks.
+
+The JSON format for hook definitions:
+
+[source,json]
+----
+{
+  "hooks": {
+    "EventType": [
+      {
+        "matcher": "optional_pattern",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "your-shell-command-here",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Key fields:
+
+* *`EventType`* -- one of the six event types (`PreToolUse`, `PostToolUse`, `Stop`, `SessionStart`, `UserPromptSubmit`, `FileChanged`)
+* *`matcher`* -- optional. For `PreToolUse` and `PostToolUse`, this filters by tool name (e.g., `"Edit"`, `"Write"`, `"Bash"`). For `FileChanged`, this is a file glob pattern.
+* *`hooks`* -- an array of hook definitions. Each hook has a `type` (e.g., `"command"`) and type-specific fields.
+* *`timeout`* -- optional. Timeout in milliseconds. Default is 60000 (60 seconds) for shell commands. Set shorter timeouts for hooks that should be fast (formatters, linters).
+
+Multiple hooks can be registered for the same event type.
+They execute in order, and each hook's exit code is evaluated independently.
+
+=== Hook Payload
+
+Every hook receives a JSON payload describing the event that triggered it.
+For shell command hooks, this payload is available via the `$CLAUDE_HOOK_PAYLOAD` environment variable.
+
+The payload structure varies by event type, but common fields include:
+
+* *`session_id`* -- the current session identifier
+* *`tool_name`* -- the tool being called (for `PreToolUse` and `PostToolUse`)
+* *`tool_input`* -- the arguments passed to the tool (for `PreToolUse` and `PostToolUse`)
+* *`tool_output`* -- the result of the tool call (for `PostToolUse` only)
+* *`file_paths`* -- files involved in the operation
+* *`stop_reason`* -- why Claude decided to stop (for `Stop` events)
+
+For `PreToolUse` on an Edit tool call, you might see:
+
+[source,json]
+----
+{
+  "session_id": "abc123",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/home/user/learnpath/src/learnpath/main.py",
+    "old_string": "def hello():",
+    "new_string": "def hello() -> str:"
+  }
+}
+----
+
+This means your hook can make decisions based on which tool is being called, what arguments it receives, and which files it touches.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Logging Hook
+
+Create a `PreToolUse` hook that logs every tool call Claude Code makes.
+This gives you visibility into the full sequence of actions during a task.
+
+Create the hook script first:
+
+[source,bash]
+----
+mkdir -p ~/learnpath/scripts
+cat > ~/learnpath/scripts/log-tool-use.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Log tool name and timestamp to a file
+PAYLOAD="$CLAUDE_HOOK_PAYLOAD"
+TOOL_NAME=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_name','unknown'))" 2>/dev/null || echo "unknown")
+echo "$(date '+%Y-%m-%d %H:%M:%S') | Tool: $TOOL_NAME" >> /tmp/claude-hooks.log
+exit 0
+SCRIPT
+chmod +x ~/learnpath/scripts/log-tool-use.sh
+----
+
+Now configure the hook.
+Edit `~/learnpath/.claude/settings.json` to add a `hooks` section (merge with your existing permissions):
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": ["...existing rules..."],
+    "deny": ["...existing rules..."]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/log-tool-use.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Clear the log and run a task:
+
+[source,bash]
+----
+> /tmp/claude-hooks.log
+cd ~/learnpath
+claude "List all Python files in src/ and count the lines in each one"
+----
+
+After Claude finishes, read the log:
+
+[source,bash]
+----
+cat /tmp/claude-hooks.log
+----
+
+You should see a timestamped entry for every tool call Claude made -- Bash, Glob, Read, etc.
+This log shows you the *exact sequence* of tool calls, which is the same information you see in transcripts but captured programmatically.
+
+=== Exercise 2: Stop Gate
+
+Create a `Stop` hook that prevents Claude from finishing until tests pass.
+This is one of the most powerful patterns: Claude becomes self-correcting.
+
+Create the hook script:
+
+[source,bash]
+----
+cat > ~/learnpath/scripts/test-gate.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Run tests. If they fail, exit 2 to force Claude to continue.
+cd ~/learnpath
+if uv run pytest -x --tb=short 2>&1; then
+    echo "All tests pass."
+    exit 0
+else
+    echo "Tests are failing. Fix them before stopping."
+    exit 2
+fi
+SCRIPT
+chmod +x ~/learnpath/scripts/test-gate.sh
+----
+
+Add the Stop hook to your settings:
+
+[source,json]
+----
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/test-gate.sh",
+            "timeout": 60000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Now give Claude a task that will break tests:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Rename the get_items function in the router to list_items but don't update the tests"
+----
+
+Watch what happens.
+Claude renames the function, tries to stop, the hook runs `pytest`, tests fail, the hook returns exit 2, and Claude is *forced to continue*.
+Claude sees the test output and knows it needs to fix the tests.
+It updates the tests, tries to stop again, the hook runs `pytest` again, and this time tests pass -- exit 0, Claude is allowed to stop.
+
+[NOTE]
+====
+Set the timeout generously for test-gate hooks.
+If your test suite takes 30 seconds, set the timeout to at least 60000 (60 seconds).
+A hook that times out is treated as an error, not a block.
+====
+
+=== Exercise 3: PostToolUse Formatter
+
+Create a `PostToolUse` hook that auto-formats Python files after every edit.
+
+Create the hook script:
+
+[source,bash]
+----
+cat > ~/learnpath/scripts/auto-format.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Auto-format Python files after Edit or Write
+PAYLOAD="$CLAUDE_HOOK_PAYLOAD"
+
+# Extract the file path from the tool input
+FILE_PATH=$(echo "$PAYLOAD" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+inp = data.get('tool_input', {})
+print(inp.get('file_path', inp.get('path', '')))
+" 2>/dev/null)
+
+# Only format .py files
+if [[ "$FILE_PATH" == *.py ]]; then
+    cd ~/learnpath
+    uv run ruff format "$FILE_PATH" 2>&1
+    echo "Formatted: $FILE_PATH"
+fi
+
+exit 0
+SCRIPT
+chmod +x ~/learnpath/scripts/auto-format.sh
+----
+
+Add the PostToolUse hook with a matcher to limit it to Edit and Write tool calls:
+
+[source,json]
+----
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/auto-format.sh",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/auto-format.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Test it:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Add a poorly formatted function to src/learnpath/main.py:
+def    badly_formatted(   x,y,z   ):
+    return     x+y+z"
+----
+
+After Claude adds the function, the PostToolUse hook fires and runs `ruff format`.
+The file on disk is properly formatted even though Claude wrote poorly formatted code.
+
+=== Exercise 4: Hook Payload Inspection
+
+Create a hook that dumps the full JSON payload to a file so you can examine its structure.
+
+[source,bash]
+----
+cat > ~/learnpath/scripts/dump-payload.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Dump the full hook payload to a file for inspection
+echo "---" >> /tmp/claude-payloads.log
+echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')" >> /tmp/claude-payloads.log
+echo "$CLAUDE_HOOK_PAYLOAD" | python3 -m json.tool >> /tmp/claude-payloads.log 2>/dev/null
+echo "" >> /tmp/claude-payloads.log
+exit 0
+SCRIPT
+chmod +x ~/learnpath/scripts/dump-payload.sh
+----
+
+Register the hook for multiple event types to compare payloads:
+
+[source,json]
+----
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/dump-payload.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/dump-payload.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/dump-payload.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Clear the log and run a task:
+
+[source,bash]
+----
+> /tmp/claude-payloads.log
+cd ~/learnpath
+claude "Read main.py and add a health check endpoint"
+----
+
+Then examine the payloads:
+
+[source,bash]
+----
+cat /tmp/claude-payloads.log
+----
+
+Compare the payloads across event types:
+
+* *PreToolUse* payloads contain `tool_name` and `tool_input` but no `tool_output`
+* *PostToolUse* payloads contain `tool_name`, `tool_input`, *and* `tool_output`
+* *Stop* payloads contain `stop_reason` but no tool-related fields
+
+This exercise teaches you what data is available at each lifecycle stage, which is essential for writing hooks that make informed decisions.
+
+[TIP]
+====
+After this exercise, remove the payload-dump hook from your settings.
+Dumping every payload to disk slows down the session and generates large log files.
+It is a diagnostic tool, not a production hook.
+====
+
+'''
+
+== Part 3: Build With It
+
+Now configure three production-quality hooks for the `{project-name}` project.
+These hooks will stay in your settings going forward.
+
+=== Hook 1: PostToolUse Auto-Format
+
+Run `ruff format` automatically after any Python file is edited or written.
+
+The hook script is the same one you created in Exercise 3.
+Ensure it exists at `~/learnpath/scripts/auto-format.sh`.
+
+=== Hook 2: FileChanged Auto-Test
+
+Run `uv run pytest -x` when files in `tests/` or `src/` change externally.
+
+Create the hook script:
+
+[source,bash]
+----
+cat > ~/learnpath/scripts/auto-test.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Run tests when source or test files change
+cd ~/learnpath
+echo "File change detected. Running tests..."
+uv run pytest -x --tb=short 2>&1
+exit 0
+SCRIPT
+chmod +x ~/learnpath/scripts/auto-test.sh
+----
+
+=== Hook 3: SessionStart Environment
+
+Inject project-specific environment variables at the start of every session.
+
+Create the hook script:
+
+[source,bash]
+----
+cat > ~/learnpath/scripts/session-env.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# Inject environment context at session start
+echo "Project: learnpath"
+echo "Python: $(python3 --version 2>&1)"
+echo "DATABASE_URL=sqlite:///./learnpath.db"
+echo "ENVIRONMENT=development"
+echo "LOG_LEVEL=DEBUG"
+exit 2
+SCRIPT
+chmod +x ~/learnpath/scripts/session-env.sh
+----
+
+[NOTE]
+====
+This script exits with code 2 intentionally.
+For `SessionStart`, exit 2 means "inject my stdout into the conversation."
+Claude sees the output and knows the environment configuration.
+Exit 0 would mean success-and-discard -- Claude would never see the output.
+====
+
+=== Complete Settings Configuration
+
+Now bring all three hooks together in `.claude/settings.json`.
+This is the complete file, merging the permission rules from Module 4 with the hooks from this module.
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pytest *)",
+      "Bash(psql *)",
+      "Bash(docker *)",
+      "Bash(podman *)",
+      "Bash(alembic *)",
+      "Bash(curl http://localhost*)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(DROP TABLE *)",
+      "Bash(DROP DATABASE *)",
+      "Bash(TRUNCATE *)",
+      "Bash(DELETE FROM * WHERE 1=1*)",
+      "Bash(chmod 777 *)",
+      "Bash(> /dev/*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/auto-format.sh",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/auto-format.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "matcher": "**/{src,tests}/**/*.py",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/auto-test.sh",
+            "timeout": 60000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/learnpath/scripts/session-env.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
+----
+
+Save this file to `~/learnpath/.claude/settings.json`.
+
+=== Test Each Hook
+
+*Test the auto-format hook:*
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Add a function called calculate_total to src/learnpath/main.py that takes a list of floats and returns their sum"
+----
+
+After the edit, check the file.
+It should be properly formatted by `ruff` regardless of how Claude wrote it.
+
+*Test the session-start hook:*
+
+[source,bash]
+----
+cd ~/learnpath
+claude "What environment am I working in?"
+----
+
+Claude should reference the environment variables injected by the session-start hook: `DATABASE_URL`, `ENVIRONMENT=development`, `LOG_LEVEL=DEBUG`.
+
+*Test the file-changed hook:*
+
+Open a second terminal and modify a test file while a Claude Code session is running:
+
+[source,bash]
+----
+# In terminal 2, while Claude is running in terminal 1:
+echo "# trigger" >> ~/learnpath/tests/test_main.py
+----
+
+The FileChanged hook should fire and run pytest in the Claude Code session.
+
+=== Transcript Review
+
+After testing, review the transcript to identify hook executions:
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+Look for:
+
+* *PostToolUse hook output* after Edit and Write calls on `.py` files -- you should see `ruff format` output
+* *SessionStart hook output* at the beginning of the conversation -- the environment variables injected by your hook
+* *Hook errors* -- if any hook failed, the transcript shows the error message and exit code
+
+Create a summary of what you observe:
+
+[cols="1,2,2",options="header"]
+|===
+|Hook |Trigger |Observed Behavior
+
+|Auto-format (PostToolUse)
+|Edit or Write on a `.py` file
+|`ruff format` runs immediately after the tool call; formatted output visible in file
+
+|Auto-test (FileChanged)
+|External modification to `src/` or `tests/` files
+|`pytest -x` runs and output appears in the session
+
+|Session-env (SessionStart)
+|Session begins
+|Environment variables injected; Claude references them in responses
+|===
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* Three hook scripts in `~/learnpath/scripts/`: `auto-format.sh`, `auto-test.sh`, `session-env.sh`
+* `.claude/settings.json` with both permission rules (from Module 4) and hook definitions (from this module)
+* Auto-format hook fires on Python edits via PostToolUse
+* Auto-test hook fires on file changes in `src/` and `tests/` via FileChanged
+* Session-start hook injects environment variables at session beginning via SessionStart
+
+*Understanding check:* You should be able to:
+
+1. Name the six event types and explain when each fires
+2. Explain exit code semantics: 0 = success, 2 = block/inject (behavior depends on event type), other = error
+3. Describe the four hook types and when to use each one
+4. Write a Stop hook that forces Claude to continue until a condition is met
+5. Explain why a SessionStart hook uses `exit 2` instead of `exit 0` to inject context
+6. Read a hook payload and extract relevant fields for decision-making
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session introspection CLI
+* Local architecture reference: `assets/site/guides/hooks.html` and `assets/site/reference/sdk/hooks-reference.html` in this course repository
+
+'''
+
+Next: xref:06-skills-workflows.adoc[Module 6: Skills & Workflows]

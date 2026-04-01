@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLI Flags - Claude Code Documentation</title>
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../../index.html">Introduction</a>
+  <a href="../../quickstart.html">Quickstart</a>
+  <a href="../../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../../concepts/how-it-works.html">How It Works</a>
+  <a href="../../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../../concepts/permissions.html">Permissions</a>
+  <a href="../../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../../guides/authentication.html">Authentication</a>
+  <a href="../../guides/hooks.html">Hooks</a>
+  <a href="../../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="overview.html">Overview</a>
+  <a href="cli-flags.html" class="active">CLI Flags</a>
+  <a href="slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../tools/bash.html">Bash</a>
+  <a href="../tools/file-operations.html">File Operations</a>
+  <a href="../tools/search.html">Search</a>
+  <a href="../tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../sdk/overview.html">Overview</a>
+  <a href="../sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Reference / Commands / CLI Flags</div>
+  </div>
+  <div class="content">
+
+<h1>CLI Flags</h1>
+<p class="page-desc">Flags passed when launching Claude Code from the terminal.</p>
+
+<h2>Core</h2>
+<ul>
+  <li><code>--print</code> &mdash; Non-interactive mode</li>
+  <li><code>--output-format</code> &mdash; text, JSON, or streaming JSON</li>
+</ul>
+
+<h2>Session</h2>
+<ul>
+  <li><code>--continue</code> &mdash; Resume most recent session</li>
+  <li><code>--resume [id]</code> &mdash; Resume with picker</li>
+  <li><code>--fork-session</code> &mdash; Fork an existing session</li>
+</ul>
+
+<h2>Model</h2>
+<ul>
+  <li><code>--model</code> &mdash; Aliases or full model IDs</li>
+  <li><code>--effort</code> &mdash; low to max</li>
+  <li><code>--fallback-model</code> &mdash; Fallback model</li>
+</ul>
+
+<h2>Permissions</h2>
+<p>Four modes: <code>default</code>, <code>acceptEdits</code>, <code>plan</code>, <code>bypassPermissions</code></p>
+<p><code>--dangerously-skip-permissions</code> for strongest automation.</p>
+
+<h2>Tool Control</h2>
+<ul>
+  <li><code>--allowed-tools</code> &mdash; Allow specific tools (glob patterns)</li>
+  <li><code>--disallowed-tools</code> &mdash; Block specific tools</li>
+  <li><code>--add-dir</code> &mdash; Add working directories</li>
+</ul>
+
+<h2>Advanced</h2>
+<ul>
+  <li><code>--mcp-config</code> &mdash; MCP config file</li>
+  <li><code>--system-prompt</code> &mdash; Custom system prompt</li>
+  <li><code>--append-system-prompt</code> &mdash; Append to system prompt</li>
+  <li><code>--bare</code> &mdash; Minimal mode</li>
+</ul>
+
+<div class="page-nav">
+  <a href="overview.html" class="prev"><span class="label">Previous</span><span class="title">Overview</span></a>
+  <a href="slash-commands.html" class="next"><span class="label">Next</span><span class="title">Slash Commands</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

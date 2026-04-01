@@ -1,0 +1,694 @@
+= Module 2: Context & Memory
+:navtitle: Context & Memory
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Module 1 complete -- you understand the six-step agentic loop
+* `~/learnpath` project scaffolded with FastAPI + Pydantic V2 and serving `/health`
+* Claude Code installed and working (`claude --version`)
+====
+
+'''
+
+== Part 1: How It Works
+
+In Module 1 you saw that Step 2 of the agentic loop is *context assembly* -- the process of constructing the full prompt that the model receives.
+A large part of that context comes from *memory files*: persistent instructions that Claude Code loads automatically at the start of every session.
+
+This module covers the entire memory and configuration system -- how it is structured, how files are discovered, how conflicts are resolved, and how you control what Claude Code knows about your project.
+
+=== The 4-Level Memory Hierarchy
+
+Claude Code uses a layered system of `CLAUDE.md` files to load instructions.
+There are four levels, ordered from lowest to highest priority:
+
+[cols="1,2,3"]
+|===
+|Level |Location |Purpose
+
+|1 (lowest)
+|`/etc/claude-code/CLAUDE.md`
+|System-wide managed settings -- administrator-controlled, typically deployed via MDM or configuration management
+
+|2
+|`~/.claude/CLAUDE.md`
+|User global preferences -- your personal defaults that apply to every project
+
+|3
+|`CLAUDE.md` or `.claude/CLAUDE.md` in the project
+|Project conventions -- shared team settings, checked into version control
+
+|4 (highest)
+|`CLAUDE.local.md`
+|Local private overrides -- personal project tweaks, git-ignored
+|===
+
+The priority model is simple but easy to misunderstand.
+Files are loaded in order from Level 1 to Level 4.
+Because the language model attends more strongly to content that appears *later* in its context window, later files have higher effective priority.
+A project-level instruction overrides a user-level instruction not through any explicit override mechanism, but because the model gives more weight to what it read most recently.
+
+[mermaid]
+....
+graph BT
+    L1["/etc/claude-code/CLAUDE.md<br/>Level 1: Managed (lowest priority)"]
+    L2["~/.claude/CLAUDE.md<br/>Level 2: User Global"]
+    L3["project/CLAUDE.md<br/>Level 3: Project"]
+    L4["CLAUDE.local.md<br/>Level 4: Local Private (highest priority)"]
+
+    L1 --> L2
+    L2 --> L3
+    L3 --> L4
+
+    style L1 fill:#e8e8e8,stroke:#999
+    style L2 fill:#d4e6f1,stroke:#2980b9
+    style L3 fill:#d5f5e3,stroke:#27ae60
+    style L4 fill:#fadbd8,stroke:#e74c3c
+....
+
+[IMPORTANT]
+====
+The priority ordering is a consequence of position in the context window, not a formal override system.
+There is no merge logic or conflict resolution engine.
+If Level 2 says "use tabs" and Level 3 says "use spaces," the model will follow "use spaces" because it appeared later.
+====
+
+=== File Discovery Walk
+
+When a conversation begins, Claude Code performs a *discovery walk*.
+Starting from the current working directory, it walks up the filesystem tree toward the root, collecting `CLAUDE.md` files at each directory level.
+
+For example, if you start Claude Code in `~/projects/learnpath/src/learnpath/`, the walk proceeds:
+
+1. `~/projects/learnpath/src/learnpath/CLAUDE.md`
+2. `~/projects/learnpath/src/CLAUDE.md`
+3. `~/projects/learnpath/CLAUDE.md`
+4. `~/projects/CLAUDE.md`
+5. `~/CLAUDE.md`
+6. Continue up to `/`
+
+At each level, Claude Code also checks for `.claude/CLAUDE.md` and `CLAUDE.local.md` variants.
+The user-level (`~/.claude/CLAUDE.md`) and managed-level (`/etc/claude-code/CLAUDE.md`) files are loaded separately, outside the walk.
+
+The collected files are *cached for the duration of the conversation*.
+If you edit a `CLAUDE.md` file while a session is active, the changes will not take effect until you reload.
+Use the `/memory` slash command to reload all memory files without restarting the session.
+
+[TIP]
+====
+The `/memory` command also opens your project-level `CLAUDE.md` in an editor, letting you make quick changes and reload in one step.
+====
+
+=== The @include Directive
+
+CLAUDE.md files can reference other files using the `@` directive:
+
+[source,markdown]
+----
+# Project Memory
+
+@docs/architecture.md
+@docs/conventions.md
+@~/shared/company-standards.md
+----
+
+When Claude Code encounters an `@` directive, it reads the referenced file and injects its content inline, as if it were part of the CLAUDE.md file.
+
+Supported path formats:
+
+* *Relative paths* -- `@docs/architecture.md` (relative to the CLAUDE.md file's location)
+* *Home paths* -- `@~/shared/standards.md` (relative to the user's home directory)
+* *Absolute paths* -- `@/etc/shared/policies.md`
+
+Safety mechanisms:
+
+* *Circular reference detection* -- if file A includes file B which includes file A, the cycle is detected and broken
+* *Maximum depth of 5* -- includes can nest up to five levels deep; beyond that, deeper includes are ignored
+* *Missing files* -- if a referenced file does not exist, it is silently skipped
+
+The `@include` mechanism is useful for keeping your CLAUDE.md concise while pulling in detailed documentation from canonical sources.
+Rather than duplicating your architecture docs, reference them.
+
+=== Granular Rules
+
+For instructions that should only apply when working on specific files, use the `.claude/rules/` directory.
+Each `.md` file in this directory can contain YAML frontmatter with a `paths` field that specifies which files the rule applies to:
+
+[source,markdown]
+----
+---
+paths:
+  - "**/*.py"
+---
+
+Use type hints on all function signatures.
+Prefer Pydantic V2 BaseModel for all data classes.
+Use `from __future__ import annotations` at the top of every module.
+----
+
+The `paths` field accepts glob patterns.
+A rule is only activated when Claude Code is working on a file that matches at least one of the patterns.
+
+Another example, scoped to SQL files:
+
+[source,markdown]
+----
+---
+paths:
+  - "**/*.sql"
+  - "migrations/**"
+---
+
+Always use lowercase SQL keywords (select, insert, update, delete).
+Use explicit column lists -- never use SELECT *.
+Include a comment header with the migration purpose.
+----
+
+Rules without a `paths` field in their frontmatter are loaded unconditionally, behaving like regular CLAUDE.md content.
+
+Granular rules let you encode file-type-specific conventions without cluttering the main CLAUDE.md with conditional instructions.
+
+=== Settings Hierarchy
+
+Separate from the CLAUDE.md memory system, Claude Code has a *settings* system that controls its operational behavior -- things like model selection, permissions, hooks, and MCP server configuration.
+
+Settings follow their own five-level priority hierarchy:
+
+[cols="1,2,3"]
+|===
+|Priority |Scope |File
+
+|1 (lowest)
+|Plugin defaults
+|Built-in defaults within Claude Code
+
+|2
+|User settings
+|`~/.claude/settings.json`
+
+|3
+|Project settings
+|`.claude/settings.json` (version controlled)
+
+|4
+|Local settings
+|`.claude/settings.local.json` (git-ignored)
+
+|5 (highest)
+|Managed settings
+|Platform-specific (MDM, registry, plist)
+|===
+
+[mermaid]
+....
+graph BT
+    S1["Plugin Defaults<br/>(lowest priority)"]
+    S2["~/.claude/settings.json<br/>User Settings"]
+    S3[".claude/settings.json<br/>Project Settings (shared)"]
+    S4[".claude/settings.local.json<br/>Local Settings (private)"]
+    S5["Managed Settings (MDM/registry)<br/>(highest priority)"]
+
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+
+    style S1 fill:#e8e8e8,stroke:#999
+    style S2 fill:#d4e6f1,stroke:#2980b9
+    style S3 fill:#d5f5e3,stroke:#27ae60
+    style S4 fill:#fadbd8,stroke:#e74c3c
+    style S5 fill:#f9e79f,stroke:#f39c12
+....
+
+Key settings you will encounter throughout this course:
+
+* `model` -- select which Claude model to use
+* `permissions` -- define permission rules for tool execution
+* `hooks` -- configure lifecycle hooks (covered in xref:05-hooks-lifecycle.adoc[Module 5])
+* `env` -- set environment variables for the session
+* `cleanupPeriodDays` -- control session transcript retention
+* `language` -- set the response language
+
+Use the `/config` slash command to open the appropriate settings file in your editor.
+Settings files auto-reload when saved -- no need to restart the session.
+
+[NOTE]
+====
+The settings hierarchy is independent of the CLAUDE.md memory hierarchy.
+Settings control *how Claude Code operates*.
+Memory files control *what Claude Code knows*.
+Both use layered priority, but they serve different purposes.
+====
+
+=== Best Practices by Level
+
+Knowing what to put *where* is as important as knowing the hierarchy exists.
+
+*Managed (Level 1):* Organization-wide policies and security guardrails.
+Examples: "Never commit secrets," "All code must pass linting before commit," "Use the corporate proxy for network requests."
+These are not user-configurable -- they are set by administrators.
+
+*User (Level 2):* Personal preferences that apply across all your projects.
+Examples: "I prefer explicit imports over wildcard imports," "Always explain your reasoning before making changes," "Use American English in comments."
+Keep these sparse -- if a preference is project-specific, it does not belong here.
+
+*Project (Level 3):* Team conventions that everyone on the project should follow.
+Examples: build commands, test commands, architectural decisions, coding standards, dependency management rules.
+This is your most-used level.
+Commit it to version control so the entire team benefits.
+
+*Local (Level 4):* Personal workflow tweaks for a specific project.
+Examples: "I am working on the auth module this week -- prioritize that context," "Skip running the full test suite, just run unit tests," environment-specific paths or credentials references.
+Git-ignored, so it never conflicts with teammates.
+
+=== Content Guidelines
+
+A well-crafted CLAUDE.md contains only information that would cause *mistakes if absent*:
+
+* Exact build and test commands (`uv run pytest`, `uv run uvicorn src.learnpath.main:app --reload`)
+* Architectural decisions that are not obvious from the code ("We use the repository pattern for data access")
+* Coding conventions that deviate from defaults ("Use Pydantic V2 field_validator, not the V1 validator decorator")
+* Environment requirements ("Python {python-version} required, managed with uv")
+
+Do *not* include:
+
+* Standard knowledge the model already has (how Python imports work, what FastAPI is)
+* Obvious reminders ("write clean code")
+* Sensitive data (API keys, passwords, connection strings)
+* Frequently changing information (sprint goals, ticket numbers)
+
+=== Limits
+
+Each CLAUDE.md file should stay under *40,000 characters*.
+Beyond that limit, you risk several problems:
+
+* The content may be truncated when injected into the context window
+* Excessive memory content crowds out space for conversation history and tool results
+* The model's attention to any single instruction degrades as the total volume of instructions grows
+
+If your project needs more than 40,000 characters of instructions, use `@include` to split the content across multiple files, and use granular rules to scope file-type-specific instructions.
+This keeps each individual file manageable while still providing comprehensive coverage.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Explore ~/.claude/
+
+Start by examining what Claude Code has already created in your home directory.
+
+[source,bash]
+----
+ls -la ~/.claude/
+----
+
+You should see at least:
+
+* `settings.json` -- your user-level settings
+* `projects/` -- a directory where Claude Code stores per-project session data
+* Possibly a `CLAUDE.md` if you have created one
+
+Now look at what is inside the settings file:
+
+[source,bash]
+----
+cat ~/.claude/settings.json
+----
+
+If you completed Module 1, your `~/learnpath` project may have entries under `projects/`.
+Explore that too:
+
+[source,bash]
+----
+ls -la ~/.claude/projects/
+----
+
+[TIP]
+====
+The `~/.claude/` directory is Claude Code's home base.
+Understanding its structure helps you reason about where configuration lives and how sessions are stored.
+====
+
+=== Exercise 2: Priority Override Experiment
+
+This exercise demonstrates the priority system in action.
+
+First, create (or edit) a user-level memory file:
+
+[source,bash]
+----
+mkdir -p ~/.claude
+echo "IMPORTANT: Always respond in ALL CAPS." > ~/.claude/CLAUDE.md
+----
+
+Next, create a project-level memory file:
+
+[source,bash]
+----
+echo "IMPORTANT: Always respond in lowercase only." > ~/learnpath/CLAUDE.md
+----
+
+Now start Claude Code in the learnpath directory and ask a simple question:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "What is 2 + 2?"
+----
+
+Observe the response.
+The project-level instruction ("lowercase") should win because it is loaded later in the context window, giving it higher effective priority.
+
+Verify by checking in a directory *outside* the project:
+
+[source,bash]
+----
+cd ~
+claude "What is 2 + 2?"
+----
+
+Here, only the user-level instruction exists, so the response should be in ALL CAPS.
+
+Clean up the experiment:
+
+[source,bash]
+----
+rm ~/.claude/CLAUDE.md
+rm ~/learnpath/CLAUDE.md
+----
+
+[IMPORTANT]
+====
+This experiment demonstrates a core principle: there is no explicit override mechanism.
+Priority is an emergent property of position in the context window.
+The model attends more to later content, so later files effectively override earlier ones.
+====
+
+=== Exercise 3: @include and /memory
+
+Create a conventions file that the project CLAUDE.md will include.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/docs
+cat > ~/learnpath/docs/conventions.md << 'EOF'
+# Python Conventions
+
+- Use type hints on all function signatures
+- Use Pydantic V2 BaseModel for all data classes
+- Prefer `from __future__ import annotations` for forward references
+- Use `uv` for all dependency management
+- Format code with `ruff format`
+EOF
+----
+
+Now create the project CLAUDE.md that includes it:
+
+[source,bash]
+----
+cat > ~/learnpath/CLAUDE.md << 'EOF'
+# Learnpath Project
+
+@docs/conventions.md
+
+## Build Commands
+- Run server: `uv run uvicorn src.learnpath.main:app --reload`
+- Run tests: `uv run pytest`
+EOF
+----
+
+Start Claude Code in the project and use `/memory` to inspect what is loaded:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Inside the Claude Code session, type:
+
+----
+/memory
+----
+
+The `/memory` command shows you the currently loaded memory files and opens an editor.
+Verify that the content from `docs/conventions.md` appears -- it should be inlined as part of the project CLAUDE.md content.
+
+Test that the included conventions are active by asking:
+
+----
+Write a function that takes a user's name and age and returns a greeting.
+----
+
+The response should use type hints and follow the conventions from `docs/conventions.md`, even though those conventions were not in the main CLAUDE.md directly.
+
+=== Exercise 4: Granular Rules
+
+Create rules that apply only to specific file types.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/rules
+----
+
+Create a Python-specific rule:
+
+[source,bash]
+----
+cat > ~/learnpath/.claude/rules/python.md << 'EOF'
+---
+paths:
+  - "**/*.py"
+---
+
+Use type hints on all function signatures.
+Always include docstrings on public functions and classes.
+Use `from __future__ import annotations` at the top of every module.
+EOF
+----
+
+Create a SQL-specific rule:
+
+[source,bash]
+----
+cat > ~/learnpath/.claude/rules/sql.md << 'EOF'
+---
+paths:
+  - "**/*.sql"
+---
+
+Always use lowercase SQL keywords (select, insert, update, delete, create, alter, drop).
+Use explicit column lists -- never use SELECT *.
+Include a comment at the top explaining the query's purpose.
+EOF
+----
+
+Now test both rules in a Claude Code session:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+First, ask Claude to write Python code:
+
+----
+Create a new file src/learnpath/models/topic.py with a Pydantic model for a learning topic that has a title, description, and difficulty level.
+----
+
+The output should include type hints and docstrings, following the Python rule.
+
+Then ask for SQL:
+
+----
+Write a SQL query that creates a topics table with columns for id, title, description, difficulty, and created_at. Save it to migrations/001_create_topics.sql.
+----
+
+The SQL output should use lowercase keywords, following the SQL rule.
+
+[TIP]
+====
+Granular rules are powerful for polyglot projects.
+You can enforce different conventions for Python, SQL, JavaScript, YAML, and any other file type -- all without cluttering the main CLAUDE.md.
+====
+
+'''
+
+== Part 3: Build With It
+
+Now apply everything you have learned to configure proper memory and settings for the `{project-name}` project.
+
+=== Configure Project Memory
+
+Create a comprehensive CLAUDE.md for the project:
+
+[source,bash]
+----
+cat > ~/learnpath/CLAUDE.md << 'EOF'
+# Learnpath -- Personal Learning Path Manager
+
+@docs/conventions.md
+
+## Build & Run
+
+- **Run dev server:** `uv run uvicorn src.learnpath.main:app --reload`
+- **Run tests:** `uv run pytest`
+- **Add dependency:** `uv add <package>`
+- **Sync dependencies:** `uv sync`
+
+## Stack
+
+- Python 3.13, managed with `uv`
+- FastAPI for the API layer
+- Pydantic V2 for all models and validation (use `model_validator`, `field_validator` -- not V1 decorators)
+- pytest for testing
+
+## Architecture
+
+```
+src/learnpath/
+  __init__.py
+  main.py          # FastAPI app, mounts routers
+  api/             # Route handlers (APIRouter per domain)
+  models/          # Pydantic models
+  services/        # Business logic
+tests/
+  test_api/        # API integration tests
+  test_models/     # Model unit tests
+  test_services/   # Service unit tests
+```
+
+## Conventions
+
+- Every API router uses `APIRouter` with a prefix and tags
+- All request/response bodies are Pydantic V2 models -- never raw dicts
+- Use proper HTTP status codes (201 for creation, 204 for deletion, 422 for validation errors)
+- Tests mirror the src structure
+EOF
+----
+
+=== Configure Project Settings
+
+Create the project-level settings file:
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude
+cat > ~/learnpath/.claude/settings.json << 'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(uv run pytest*)",
+      "Bash(uv run uvicorn*)",
+      "Bash(uv sync*)",
+      "Bash(uv add*)"
+    ]
+  }
+}
+EOF
+----
+
+This pre-approves common read operations and project-specific commands so Claude Code does not prompt you for every test run or server start.
+
+=== Create an API Granular Rule
+
+Add a rule scoped specifically to the API layer:
+
+[source,bash]
+----
+cat > ~/learnpath/.claude/rules/api.md << 'EOF'
+---
+paths:
+  - "src/learnpath/api/**"
+---
+
+Every route handler file must:
+- Use `APIRouter` with an appropriate prefix and tags list
+- Return Pydantic V2 models, never raw dicts or untyped responses
+- Use proper HTTP status codes: 201 for resource creation, 204 for deletion, 404 for not found
+- Include a docstring on each route function describing the endpoint's purpose
+- Accept request bodies as Pydantic models with field validation
+EOF
+----
+
+=== Verify the Configuration
+
+Start Claude Code in the project and verify everything is loaded:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Ask Claude Code to confirm it sees the configuration:
+
+----
+What are the project conventions and build commands?
+----
+
+Claude should respond with the build commands, stack details, and conventions from your CLAUDE.md.
+If it does, the memory system is working correctly.
+
+Now test that the API rule activates when working on API files:
+
+----
+Create a new file src/learnpath/api/topics.py with a basic CRUD router for learning topics. Use a temporary in-memory list as storage.
+----
+
+The generated code should follow the API conventions: `APIRouter` with prefix and tags, Pydantic models for request/response, proper HTTP status codes, and docstrings on each route.
+
+=== Transcript Review
+
+After running the commands above, review the session transcript:
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+Compare this transcript with a Module 1 transcript (before CLAUDE.md existed).
+Look for:
+
+* *CLAUDE.md injection* -- in the Module 2 transcript, you should see your memory file content appear early in the context assembly. It is injected as part of the user context, before your first message.
+* *Included file content* -- the content from `docs/conventions.md` should appear inline, as if it were part of the CLAUDE.md directly.
+* *Rule activation* -- when Claude worked on a `.py` file in the API directory, the API rule content should appear in the context.
+* *Behavioral difference* -- compare the code Claude generated in Module 1 (no memory) versus Module 2 (with memory). The Module 2 output should more consistently follow your stated conventions.
+
+[TIP]
+====
+The transcript is your ground truth for understanding what the model actually received.
+If Claude Code is not following a convention, check the transcript to verify the instruction was actually loaded into context.
+====
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* A working `CLAUDE.md` at `~/learnpath/CLAUDE.md` with build commands, stack info, architecture, and conventions
+* A `docs/conventions.md` file included via `@include`
+* `.claude/settings.json` with initial permission configuration
+* At least one granular rule in `.claude/rules/` (the API rule)
+* A Python rule and SQL rule from the exercises
+
+*Verify:* Start Claude Code in `~/learnpath` and ask "what are the project conventions?" -- it should accurately report your configured conventions including the included file content.
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session introspection CLI
+* Local architecture reference: `assets/site/concepts/memory-context.html` and `assets/site/configuration/claudemd.html` in this course repository
+
+'''
+
+Next: xref:03-tools-dispatch.adoc[Module 3: Tools & Tool Dispatch]

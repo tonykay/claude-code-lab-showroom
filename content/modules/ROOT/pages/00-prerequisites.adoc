@@ -1,0 +1,86 @@
+= Prerequisites
+:navtitle: Prerequisites
+:source-highlighter: rouge
+:icons: font
+
+== What We Assume
+
+This course is designed for experienced developers.
+Before you begin, you should be comfortable with:
+
+* A *Unix terminal* (bash or zsh) -- you will spend significant time on the command line
+* *Git and GitHub* -- branching, committing, pull requests
+* *Python basics* -- functions, classes, decorators, virtual environments
+* *REST API familiarity* -- HTTP methods, status codes, JSON payloads
+* *Casual Claude Code experience* -- you have used Claude Code at least a few times and understand the basic interaction model
+
+If any of these are unfamiliar, take time to fill the gaps before proceeding.
+The course moves fast and does not cover fundamentals.
+
+== Required Software
+
+NOTE: If you do not have Claude Code installed yet, follow the official installation guide at {claude-code-docs-url}[Claude Code Documentation].
+
+Verify that the following tools are available on your system:
+
+[source,bash]
+----
+claude --version
+python3 --version    # should be {python-version}.x
+uv --version
+node --version
+psql --version
+docker --version || podman --version
+----
+
+All commands should return a version number without errors.
+If any are missing, install them before continuing.
+
+== Install claude-code-transcripts
+
+The {claude-code-transcripts-url}[claude-code-transcripts] tool is used throughout the course for introspection exercises.
+It lets you extract and analyze real Claude Code session data.
+
+Install it with pipx:
+
+[source,bash]
+----
+pipx install claude-code-transcripts
+----
+
+Verify the installation:
+
+[source,bash]
+----
+claude-transcripts --help
+----
+
+== Postgres via Container (Optional)
+
+If you do not have PostgreSQL installed locally, you can run it in a container.
+This gives you a clean, disposable database for the course project.
+
+[source,bash]
+----
+docker run -d \
+  --name {project-name}-postgres \
+  -e POSTGRES_USER={project-name} \
+  -e POSTGRES_PASSWORD={project-name} \
+  -e POSTGRES_DB={project-name} \
+  -p 5432:5432 \
+  postgres:16
+----
+
+If you use Podman instead of Docker, substitute `podman` for `docker` in the command above.
+
+Verify the database is running:
+
+[source,bash]
+----
+psql -h localhost -U {project-name} -d {project-name} -c "SELECT 1;"
+----
+
+== Ready?
+
+Your environment is set.
+Proceed to xref:01-agentic-loop.adoc[Module 1: The Agentic Loop] to begin the course.

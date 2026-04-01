@@ -1,0 +1,21 @@
+name: modules
+title: "Claude Code Deep Dive: Zero to Hero"
+version: ~
+nav:
+  - modules/ROOT/nav.adoc
+
+asciidoc:
+  attributes:
+    experimental: true
+    page-pagination: true
+    icons: font
+    source-highlighter: rouge
+    # Course metadata
+    course-version: v0.1.0
+    claude-code-docs-url: https://code.claude.com/docs
+    claude-code-transcripts-url: https://github.com/simonw/claude-code-transcripts
+    claude-howto-url: https://github.com/luongnv89/claude-howto
+    claude-code-tips-url: https://github.com/ykdojo/claude-code-tips
+    # Build project defaults
+    project-name: learnpath
+    python-version: "3.13"

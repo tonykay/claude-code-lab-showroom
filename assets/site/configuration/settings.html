@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../concepts/how-it-works.html">How It Works</a>
+  <a href="../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../concepts/permissions.html">Permissions</a>
+  <a href="../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="claudemd.html">CLAUDE.md</a>
+  <a href="environment-variables.html">Environment Variables</a>
+  <a href="settings.html" class="active">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../guides/authentication.html">Authentication</a>
+  <a href="../guides/hooks.html">Hooks</a>
+  <a href="../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Configuration / Settings</div>
+  </div>
+  <div class="content">
+
+<h1>Settings</h1>
+<p class="page-desc">Configuration through JSON settings files at multiple levels.</p>
+
+<h2>Hierarchy</h2>
+<p>Increasing priority: Plugin defaults &rarr; User settings &rarr; Project settings &rarr; Local settings &rarr; Managed settings</p>
+
+<h2>Scopes</h2>
+<table>
+  <thead><tr><th>Scope</th><th>File</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Global (User)</td><td><code>~/.claude/settings.json</code></td><td>Model selection, cleanup policies</td></tr>
+    <tr><td>Project (Shared)</td><td><code>.claude/settings.json</code></td><td>Permissions, MCP servers (version controlled)</td></tr>
+    <tr><td>Local (Personal)</td><td><code>.claude/settings.local.json</code></td><td>Individual overrides (gitignored)</td></tr>
+    <tr><td>Managed (Enterprise)</td><td>Platform-specific (MDM, registry, plist)</td><td>Highest priority, not user-overridable</td></tr>
+  </tbody>
+</table>
+<p>Open with <code>/config</code> command or edit JSON directly (auto-reloads).</p>
+
+<h2>Key Options</h2>
+<ul>
+  <li><code>model</code> &mdash; Model selection</li>
+  <li><code>permissions</code> &mdash; Permission rules</li>
+  <li><code>hooks</code> &mdash; Lifecycle hooks</li>
+  <li><code>cleanupPeriodDays</code> &mdash; Session cleanup</li>
+  <li><code>env</code> &mdash; Environment variables</li>
+  <li><code>language</code> &mdash; Language preference</li>
+  <li><code>alwaysThinkingEnabled</code> &mdash; Force thinking</li>
+</ul>
+
+<h2>Enterprise</h2>
+<ul>
+  <li><code>allowManagedHooksOnly</code></li>
+  <li><code>allowManagedPermissionRulesOnly</code></li>
+</ul>
+
+<div class="page-nav">
+  <a href="environment-variables.html" class="prev"><span class="label">Previous</span><span class="title">Environment Variables</span></a>
+  <a href="../guides/authentication.html" class="next"><span class="label">Next</span><span class="title">Authentication</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

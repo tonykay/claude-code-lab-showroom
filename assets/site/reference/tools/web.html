@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web - Claude Code Documentation</title>
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../../index.html">Introduction</a>
+  <a href="../../quickstart.html">Quickstart</a>
+  <a href="../../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../../concepts/how-it-works.html">How It Works</a>
+  <a href="../../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../../concepts/permissions.html">Permissions</a>
+  <a href="../../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../../guides/authentication.html">Authentication</a>
+  <a href="../../guides/hooks.html">Hooks</a>
+  <a href="../../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../commands/overview.html">Overview</a>
+  <a href="../commands/cli-flags.html">CLI Flags</a>
+  <a href="../commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="agent.html">Agent &amp; Tasks</a>
+  <a href="bash.html">Bash</a>
+  <a href="file-operations.html">File Operations</a>
+  <a href="search.html">Search</a>
+  <a href="web.html" class="active">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../sdk/overview.html">Overview</a>
+  <a href="../sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Reference / Tools / Web</div>
+  </div>
+  <div class="content">
+
+<h1>Web</h1>
+<p class="page-desc">Tools for fetching web content and searching the internet.</p>
+
+<h2>WebFetch</h2>
+<ul>
+  <li>Fetch URL and convert HTML to markdown</li>
+  <li>Processed with secondary model</li>
+  <li>15-minute cache</li>
+  <li>Handles redirects</li>
+  <li>Read-only operation</li>
+</ul>
+
+<h2>WebSearch</h2>
+<ul>
+  <li>Search web for current information</li>
+  <li>Returns titles, snippets, and URLs</li>
+  <li>US-only</li>
+  <li>Domain filtering available</li>
+  <li>Citations required in responses</li>
+  <li>Up to 8 internal searches per invocation</li>
+</ul>
+
+<div class="page-nav">
+  <a href="search.html" class="prev"><span class="label">Previous</span><span class="title">Search</span></a>
+  <a href="../sdk/overview.html" class="next"><span class="label">Next</span><span class="title">Overview</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

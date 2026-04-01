@@ -1,0 +1,738 @@
+= Module 3: Tools & Tool Dispatch
+:navtitle: Tools & Tool Dispatch
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-2 complete -- you understand the agentic loop, context assembly, and memory hierarchy
+* `~/learnpath` project scaffolded with FastAPI + Pydantic V2, serving `/health`
+* `CLAUDE.md` and `.claude/settings.json` configured from Module 2
+====
+
+'''
+
+== Part 1: How It Works
+
+In Module 1 you saw that Steps 3-5 of the agentic loop are *tool selection*, *permission check*, and *tool execution*.
+Every action Claude Code takes on your behalf -- reading a file, writing code, running a command, searching your codebase -- goes through a tool.
+Understanding the full tool taxonomy and dispatch flow is essential for predicting what Claude Code will do and why.
+
+=== The Tool Taxonomy
+
+Claude Code has access to a fixed set of built-in tools, organized into six categories.
+Each tool has specific behaviors, constraints, and permission characteristics.
+
+[cols="2,1,3,1",options="header"]
+|===
+|Tool |Category |Key Behavior |Auto-Approved?
+
+|Read
+|File
+|Reads up to 2000 lines in `cat -n` format. Supports images, PDFs (20 pages max), and Jupyter notebooks.
+|Yes
+
+|Edit
+|File
+|Exact string replacement. Requires a prior Read of the target file. The `old_string` must be unique in the file, or you must set `replace_all: true`.
+|No
+
+|Write
+|File
+|Creates new files or overwrites existing ones. Requires a prior Read for existing files. Prefer Edit for modifications.
+|No
+
+|Glob
+|Search
+|Fast file pattern matching (e.g., `+**/*.py+`). Results sorted by modification time. Excludes VCS directories.
+|Yes
+
+|Grep
+|Search
+|ripgrep-based content search. Three output modes: `files_with_matches` (default), `content`, `count`. Supports multiline matching. Default head limit of 250 results.
+|Yes
+
+|LS
+|Search
+|Lists directory contents.
+|Yes
+
+|Bash
+|Shell
+|Executes shell commands. Working directory persists between calls; shell state (env vars, aliases) does not. Compound commands checked independently. 2-minute default timeout, 10-minute max.
+|No
+
+|WebFetch
+|Web
+|Fetches a URL and converts HTML to markdown. Processed with a secondary model. 15-minute cache. Read-only.
+|No
+
+|WebSearch
+|Web
+|Searches the web for current information. US-only. Domain filtering available. Citations required in responses.
+|No
+
+|Task (Agent)
+|Agent
+|Spawns sub-agents with isolated context. Supports background execution and git worktree isolation. Preview of xref:09-multi-agent.adoc[Module 9].
+|No
+
+|TodoWrite
+|Agent
+|Creates structured task lists with statuses: pending, in_progress, completed. Used for tracking multi-step work.
+|Yes
+
+|NotebookEdit
+|Notebook
+|Edits individual cells in Jupyter notebooks (.ipynb files).
+|No
+
+|MCP Tools
+|MCP
+|Named `mcp__<server>__<tool>`. Configured in `mcp_servers.json`. Extend Claude Code with external capabilities. Preview of xref:08-mcp-servers.adoc[Module 8].
+|Varies
+|===
+
+[TIP]
+====
+Auto-approved tools (Read, Glob, Grep, LS, TodoWrite) execute without prompting you.
+This is by design: they are read-only or low-risk operations.
+Tools that modify files, run commands, or access external services always require permission in the default mode.
+====
+
+=== Tool Dispatch Flow
+
+When Claude Code decides to use a tool, the request goes through a dispatch pipeline before anything executes.
+This is the core mechanism that keeps you in control.
+
+[mermaid]
+....
+flowchart TD
+    A["User sends request"] --> B["Model selects tool + parameters"]
+    B --> C{"checkPermissions()"}
+    C -->|allow| D["Execute tool"]
+    C -->|ask| E["Prompt user for approval"]
+    C -->|deny| F["Block execution"]
+    E -->|approved| D
+    E -->|rejected| G["Return denial to model"]
+    F --> G
+    D --> H["Return results to model"]
+    G --> H
+    H --> I{"Task complete?"}
+    I -->|no| B
+    I -->|yes| J["Respond to user"]
+
+    style A fill:#d4e6f1,stroke:#2980b9
+    style C fill:#f9e79f,stroke:#f39c12
+    style D fill:#d5f5e3,stroke:#27ae60
+    style F fill:#fadbd8,stroke:#e74c3c
+    style J fill:#d4e6f1,stroke:#2980b9
+....
+
+The key insight is that *tool dispatch is a loop*.
+After a tool executes, the results flow back to the model, which may select another tool.
+A single user request can trigger dozens of tool calls -- reading files, searching for context, editing code, running tests -- all chained together in the agentic loop you learned in Module 1.
+
+=== How Claude Selects Tools
+
+Claude Code's system prompt contains explicit instructions that guide tool selection.
+The model is told to prefer dedicated tools over shell commands for common operations:
+
+[cols="1,1,2",options="header"]
+|===
+|Instead of... |Use... |Why
+
+|`cat` / `head` / `tail`
+|Read
+|Preserves line numbers, handles binary formats, respects file permissions
+
+|`sed` / `awk`
+|Edit
+|Prevents hallucinated edits, ensures exact matching, maintains file integrity
+
+|`grep` / `rg`
+|Grep
+|Optimized for permissions, structured output modes, context-aware head limits
+
+|`find` / `ls`
+|Glob
+|Sorted by modification time, respects VCS exclusions, always auto-approved
+
+|`echo >` / `cat <<EOF`
+|Write
+|Tracks file state, enforces Read-before-Write, proper encoding handling
+|===
+
+These are *preferences, not hard rules*.
+If a dedicated tool cannot accomplish the task, the model falls back to Bash.
+For example, Bash is the right choice for running tests (`uv run pytest`), starting servers, installing packages, or executing any command that is not covered by a dedicated tool.
+
+[NOTE]
+====
+When you explicitly ask Claude Code to run a shell command (e.g., "run `grep -r 'import' src/`"), it will use Bash to honor your request.
+But if you ask "find all imports in the project," it will use Grep because the system prompt tells it to prefer the dedicated tool.
+====
+
+=== Edit Tool Deep Dive
+
+The Edit tool is the most nuanced tool in Claude Code's arsenal.
+It performs *exact string replacement* -- find an old string, replace it with a new string.
+This design has several important constraints:
+
+*Must Read first.*
+Claude Code enforces that you cannot edit a file you have not read in the current session.
+This prevents the model from guessing at file contents and making edits based on assumptions.
+
+*Unique match required.*
+The `old_string` must appear exactly once in the file.
+If it appears multiple times, the edit fails -- unless you set `replace_all: true` to change every occurrence.
+This forces the model to include enough surrounding context to uniquely identify the edit location.
+
+*Exact whitespace matching.*
+The `old_string` must match the file content exactly, including indentation (tabs vs spaces) and trailing whitespace.
+The model must preserve the precise formatting it saw in the Read output.
+
+*Why this design matters:*
+Consider the alternative -- a line-number-based edit system.
+Line numbers shift whenever content is added or removed, creating race conditions in multi-step edits.
+Exact string matching is position-independent: as long as the string exists in the file, the edit succeeds regardless of what happened on other lines.
+This makes Edit reliable across long chains of modifications.
+
+[source]
+----
+Tool: Edit
+Parameters:
+  file_path: /home/user/learnpath/src/learnpath/main.py
+  old_string: |
+    app = FastAPI()
+  new_string: |
+    app = FastAPI(
+        title="Learnpath API",
+        description="Personal learning path manager",
+        version="0.1.0",
+    )
+----
+
+The model identified a unique string (`app = FastAPI()`) and replaced it with the expanded version.
+If the file contained multiple `app = FastAPI()` calls, this edit would fail, and the model would need to include more surrounding context to make the match unique.
+
+=== Bash Tool Deep Dive
+
+The Bash tool is the most versatile tool -- and the most permission-sensitive.
+
+*Working directory persists.*
+If Claude Code runs `cd ~/learnpath` in one Bash call, subsequent Bash calls will start in `~/learnpath`.
+The working directory is maintained across the entire session.
+
+*Shell state does NOT persist.*
+Environment variables, aliases, shell functions, and shell options reset with every Bash call.
+Each invocation starts a fresh shell initialized from your profile.
+If you need an environment variable, you must set it in the same command: `MY_VAR=value && some-command`.
+
+*Compound commands are checked independently.*
+When Claude Code runs `uv run pytest && echo "Tests passed"`, the permission system checks `uv run pytest` and `echo "Tests passed"` as separate commands.
+If one part matches an allow rule and another matches a deny rule, only the denied part is blocked.
+
+*Background execution.*
+Setting `run_in_background: true` runs a command asynchronously.
+This is useful for starting long-running processes (like a dev server) without blocking the conversation.
+Claude Code will notify you when the background command completes.
+
+*Output truncation.*
+If a command produces too much output, it is truncated to prevent flooding the context window.
+This is why `grep -r` in Bash is inferior to the Grep tool -- Grep has structured head limits and output modes that manage context consumption.
+
+*Timeouts.*
+Default: 2 minutes (120,000ms).
+Maximum: 10 minutes (600,000ms).
+The timeout is configurable per call via the `timeout` parameter.
+
+=== Grep Tool Deep Dive
+
+The Grep tool wraps ripgrep (not GNU grep) and provides three output modes optimized for different use cases:
+
+*`files_with_matches` (default).* Returns only the file paths that contain matches.
+Use when you need to know *where* something exists but do not need the surrounding code.
+This is the most context-efficient mode.
+
+*`content`.* Returns matching lines with optional surrounding context (`-A`, `-B`, `-C` parameters).
+Use when you need to see the actual code around a match.
+Supports line numbers with `-n`.
+
+*`count`.* Returns the number of matches per file.
+Use for frequency analysis -- how many times does a pattern appear, and in which files?
+
+*Multiline matching.*
+By default, patterns match within single lines.
+Set `multiline: true` to match patterns that span multiple lines.
+For example, finding a function definition and its first line of body:
+
+[source]
+----
+Tool: Grep
+Parameters:
+  pattern: "def create_topic.*\n.*return"
+  multiline: true
+  output_mode: content
+----
+
+*Head limit.*
+Results are capped at 250 entries by default.
+This prevents a broad search from consuming too much of the context window.
+You can adjust this with the `head_limit` parameter, or set it to 0 for unlimited results (use sparingly).
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Tool Call Census
+
+Review the transcripts from your Module 1 and Module 2 build sessions to understand which tools Claude Code actually uses and how often.
+
+[source,bash]
+----
+claude-transcripts list --limit 5
+----
+
+Pick a transcript from a build session and view it:
+
+[source,bash]
+----
+claude-transcripts view <session-id>
+----
+
+Scan through the transcript and create a frequency table.
+For each tool call you find, tally it:
+
+[cols="1,1",options="header"]
+|===
+|Tool |Count
+
+|Read
+|?
+
+|Edit
+|?
+
+|Write
+|?
+
+|Bash
+|?
+
+|Glob
+|?
+
+|Grep
+|?
+|===
+
+Questions to answer:
+
+* Which tool was called most frequently? (It is almost always Read.)
+* What is the ratio of Read calls to Edit calls? (Read should outnumber Edit because Edit requires a preceding Read, and the model also reads files for context without editing.)
+* Were there any Bash calls that could have been handled by a dedicated tool?
+
+[TIP]
+====
+If you do not have `claude-transcripts` installed, you can ask Claude Code to find your session files directly:
+`ls -la ~/.claude/projects/` and look for JSONL session files.
+====
+
+=== Exercise 2: Edit vs Write
+
+This exercise reveals when Claude Code chooses Edit versus Write.
+
+*Test 1: Small change to an existing file.*
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Add a '/version' endpoint to src/learnpath/main.py that returns {'version': '0.1.0'}"
+----
+
+Observe the transcript.
+Claude Code should: Read `main.py` first, then use Edit to insert the new endpoint.
+It should not use Write because the file already exists and only a small change is needed.
+
+*Test 2: Create a new file.*
+
+[source,bash]
+----
+claude "Create a new file src/learnpath/models/__init__.py that exports nothing"
+----
+
+Observe: Claude Code should use Write, because the file does not exist yet.
+
+*Test 3: Complete rewrite.*
+
+[source,bash]
+----
+claude "Completely rewrite src/learnpath/main.py to add proper metadata, description, and organize imports"
+----
+
+Does Claude use Edit (multiple targeted replacements) or Write (full overwrite)?
+The answer depends on how extensive the changes are.
+For small-to-moderate rewrites, Claude typically chains multiple Edit calls.
+For a complete rewrite, it may use Write.
+
+Check: in every case where Edit was used, did Claude Read the file first?
+The answer must always be yes -- Edit fails without a prior Read.
+
+=== Exercise 3: Bash vs Dedicated Tools
+
+Test whether Claude Code follows the system prompt's tool preferences.
+
+*Test 1: File search.*
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Find all Python files in the project"
+----
+
+Expected: Claude should use Glob with pattern `+**/*.py+`, not Bash with `find`.
+
+*Test 2: Content search.*
+
+[source,bash]
+----
+claude "Search for 'import fastapi' in the codebase"
+----
+
+Expected: Claude should use Grep, not Bash with `grep`.
+
+*Test 3: Explicit shell request.*
+
+[source,bash]
+----
+claude "Run this command: grep -r 'import' src/"
+----
+
+What happens?
+When you explicitly request a specific shell command, Claude Code typically honors the request and uses Bash.
+The system prompt preferences are guidelines, not hard blocks.
+
+Compare the outputs from Tests 2 and 3.
+The Grep tool returns structured results with file paths and optional context.
+The Bash `grep` returns raw output that consumes more context and may be truncated.
+
+=== Exercise 4: Compound Command Permissions
+
+Observe how Claude Code handles permission checking for compound commands.
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Run uv run pytest && echo 'Tests passed'"
+----
+
+If you configured `Bash(uv run pytest*)` as an allow rule in Module 2, observe what happens:
+
+* `uv run pytest` is checked against the allow rules
+* `echo 'Tests passed'` is checked independently
+* Each part may have a different permission outcome
+
+Try a more complex compound:
+
+[source,bash]
+----
+claude "Run uv run pytest && uv run ruff check src/"
+----
+
+If `uv run ruff check` is not in your allow rules, Claude Code will prompt you for that part even though `uv run pytest` is pre-approved.
+Each segment of a compound command is evaluated on its own.
+
+[NOTE]
+====
+This per-segment checking is a security feature.
+It prevents a malicious CLAUDE.md from chaining an allowed command with a harmful one using `&&` or `;`.
+====
+
+'''
+
+== Part 3: Build With It
+
+In this module you build the database layer and CRUD API for the `{project-name}` project.
+This is the most tool-intensive build session so far -- Claude Code will use Read, Write, Edit, Bash, Glob, and Grep extensively.
+Pay attention to *which* tools it selects and *why*.
+
+=== Step 1: Create the Database Migration
+
+Ask Claude Code to create the SQL schema for your database.
+Start a session in the project directory:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Then give this prompt:
+
+----
+Create a SQL migration file at migrations/001_initial_schema.sql with the following schema:
+
+- A topics table with: id (serial primary key), name (varchar 255, unique, not null), description (text), icon (varchar 50)
+- An assets table with: id (serial primary key), topic_id (integer, foreign key to topics), title (varchar 500, not null), url (text, not null), type (varchar 20, not null, check constraint for 'video', 'blog', 'tweet', 'repo', 'howto'), notes (text), rating (integer, check between 1 and 5), created_at (timestamp, default current_timestamp)
+----
+
+Observe: Claude Code should use Write to create the new file, since it does not exist.
+The generated SQL should look like this:
+
+[source,sql]
+----
+-- Initial schema for learnpath
+-- Creates the topics and assets tables
+
+create table topics (
+    id serial primary key,
+    name varchar(255) not null unique,
+    description text,
+    icon varchar(50)
+);
+
+create table assets (
+    id serial primary key,
+    topic_id integer references topics(id),
+    title varchar(500) not null,
+    url text not null,
+    type varchar(20) not null check (type in ('video', 'blog', 'tweet', 'repo', 'howto')),
+    notes text,
+    rating integer check (rating between 1 and 5),
+    created_at timestamp default current_timestamp
+);
+----
+
+[TIP]
+====
+If you created a SQL granular rule in Module 2, the SQL keywords should be lowercase.
+This is the memory system and tool system working together -- memory tells Claude *how* to write, tools *perform* the writing.
+====
+
+=== Step 2: Create Pydantic V2 Models
+
+Ask Claude Code to create the data models:
+
+----
+Create Pydantic V2 models in src/learnpath/models/schemas.py:
+
+1. TopicBase with name (str), description (optional str), icon (optional str)
+2. TopicCreate extending TopicBase
+3. TopicResponse extending TopicBase with id (int) and model_config for from_attributes
+4. AssetBase with topic_id (int), title (str), url (str), type (Literal for video/blog/tweet/repo/howto), notes (optional str), rating (optional int, between 1 and 5)
+5. AssetCreate extending AssetBase
+6. AssetResponse extending AssetBase with id (int), created_at (datetime), and model_config for from_attributes
+
+Use field_validator for the rating field to enforce the 1-5 range.
+----
+
+Observe: Claude Code should Write a new file.
+Watch for the Read-before-Write check -- for a new file, no prior Read is needed.
+
+The generated models should use Pydantic V2 syntax:
+
+[source,python]
+----
+from datetime import datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+
+class TopicBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class TopicCreate(TopicBase):
+    pass
+
+
+class TopicResponse(TopicBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssetBase(BaseModel):
+    topic_id: int
+    title: str
+    url: str
+    type: Literal["video", "blog", "tweet", "repo", "howto"]
+    notes: Optional[str] = None
+    rating: Optional[int] = None
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not 1 <= v <= 5:
+            raise ValueError("Rating must be between 1 and 5")
+        return v
+
+
+class AssetCreate(AssetBase):
+    pass
+
+
+class AssetResponse(AssetBase):
+    id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+----
+
+=== Step 3: Create CRUD Endpoints
+
+Ask Claude Code to build the API routes:
+
+----
+Create CRUD API endpoints:
+
+1. In src/learnpath/api/topics.py:
+   - GET /topics -- list all topics, returns list of TopicResponse
+   - POST /topics -- create a topic, accepts TopicCreate, returns TopicResponse with 201 status
+   - GET /topics/{topic_id} -- get single topic, returns TopicResponse or 404
+   - PUT /topics/{topic_id} -- update a topic, accepts TopicCreate, returns TopicResponse or 404
+   - DELETE /topics/{topic_id} -- delete a topic, returns 204 or 404
+
+2. In src/learnpath/api/assets.py:
+   - GET /assets -- list all assets, optional query param topic_id to filter by topic
+   - POST /assets -- create an asset, accepts AssetCreate, returns AssetResponse with 201 status
+
+Use in-memory lists as storage for now (we'll add a real database later).
+Import the Pydantic models from models/schemas.py.
+Register both routers in main.py.
+----
+
+This is where the tool dispatch becomes interesting.
+Watch Claude Code:
+
+1. *Read* `main.py` to understand the current state
+2. *Write* `src/learnpath/api/topics.py` (new file)
+3. *Write* `src/learnpath/api/assets.py` (new file)
+4. *Write* or *create* `src/learnpath/api/__init__.py` if needed
+5. *Read* `main.py` again (or use the cached read), then *Edit* it to register the routers
+6. *Bash* to run `uv run pytest` or start the server to verify
+
+=== Step 4: Add Pytest Tests
+
+Ask Claude Code to create tests:
+
+----
+Create pytest tests:
+
+1. tests/test_api/test_topics.py -- test all topic CRUD endpoints using FastAPI TestClient
+2. tests/test_api/test_assets.py -- test asset creation and listing, including topic_id filtering
+
+Make sure to test:
+- Creating a topic returns 201
+- Listing topics returns the created topic
+- Getting a non-existent topic returns 404
+- Deleting a topic returns 204
+- Asset rating validation (values outside 1-5 should fail)
+----
+
+Then run the tests:
+
+----
+Run uv run pytest with verbose output
+----
+
+Claude Code will use Bash for the test run.
+If tests fail, watch the debugging loop: Claude will Read the test output, Read the source files, Edit the fixes, and run Bash again.
+This is the agentic loop in action across multiple tools.
+
+=== Transcript Review
+
+After the build session, review the transcript to analyze tool usage patterns.
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+Create a tool usage analysis:
+
+[cols="2,1,2",options="header"]
+|===
+|Operation |Tool Used |Why This Tool?
+
+|Creating migration SQL
+|Write
+|New file, does not exist yet
+
+|Creating Pydantic models
+|Write
+|New file
+
+|Creating API route files
+|Write
+|New files
+
+|Modifying main.py to add routers
+|Read then Edit
+|Existing file, small targeted change
+
+|Running pytest
+|Bash
+|Shell command, no dedicated tool for this
+
+|Searching for imports
+|Grep
+|Content search across files
+
+|Finding Python files
+|Glob
+|File pattern matching
+|===
+
+Count the Read-to-Edit sequences versus standalone Write calls.
+For an existing file modification, you should always see a Read followed by one or more Edits.
+For new file creation, you should see a standalone Write.
+
+Note any Bash calls that were used for file operations rather than running commands.
+If there are any, they represent cases where Claude Code fell back to Bash instead of using the dedicated tool -- this is uncommon but can happen.
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* `migrations/001_initial_schema.sql` with the topics and assets schema
+* `src/learnpath/models/schemas.py` with Pydantic V2 models (TopicBase, TopicCreate, TopicResponse, AssetBase, AssetCreate, AssetResponse)
+* `src/learnpath/api/topics.py` with full CRUD endpoints
+* `src/learnpath/api/assets.py` with list and create endpoints
+* `main.py` updated to register both API routers
+* `tests/test_api/test_topics.py` and `tests/test_api/test_assets.py` with passing tests
+
+*Verify:*
+
+[source,bash]
+----
+uv run pytest -v
+----
+
+All tests should pass.
+
+[source,bash]
+----
+uv run uvicorn src.learnpath.main:app --reload &
+curl http://localhost:8000/topics
+----
+
+Should return an empty list: `[]`
+
+*Understanding check:* You should be able to explain why Claude Code chose specific tools during the build -- why it used Write for new files, Edit for modifications, Read before every Edit, and Bash for running commands.
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session introspection CLI
+* Local architecture reference: `assets/site/concepts/tools.html` and `assets/site/reference/tools/` in this course repository
+
+'''
+
+Next: xref:04-permissions-trust.adoc[Module 4: Permissions & Trust]

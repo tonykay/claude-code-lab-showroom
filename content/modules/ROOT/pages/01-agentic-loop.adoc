@@ -1,0 +1,489 @@
+= Module 1: The Agentic Loop
+:navtitle: The Agentic Loop
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Claude Code installed and working (`claude --version`)
+* `claude-code-transcripts` installed (see xref:00-prerequisites.adoc[Prerequisites])
+====
+
+'''
+
+== Part 1: How It Works
+
+Most developer tools follow a simple request-response pattern: you ask a question, you get an answer.
+Claude Code does not work that way.
+It operates as a *terminal-based coding agent* that executes a continuous loop -- reasoning, acting, observing, and deciding what to do next -- until a task is complete.
+This loop is the architectural core of everything Claude Code does.
+
+Understanding it is not optional.
+Every module in this course builds on the mechanics described here.
+
+=== The Six-Step Cycle
+
+Every interaction with Claude Code follows the same six-step cycle.
+Whether you type a one-line question or ask it to refactor an entire module, the same machinery runs.
+
+[mermaid]
+....
+graph TD
+    A["1. User Input"] --> B["2. Context Assembly"]
+    B --> C["3. Model Reasoning"]
+    C --> D["4. Permission Check"]
+    D --> E["5. Tool Execution"]
+    E --> F{"6. Continue?"}
+    F -->|"More work needed"| C
+    F -->|"Task complete"| G["Response to User"]
+....
+
+==== Step 1: User Input
+
+The loop begins when Claude Code receives a prompt.
+This can happen in several ways:
+
+* *Interactive REPL* -- you type a message directly into the Claude Code terminal session
+* *Standard input* -- you pipe text into `claude`, e.g., `echo "explain this" | claude --print`
+* *CLI flags* -- you pass a prompt via the command line, e.g., `claude "create hello.py"`
+* *Resumed sessions* -- you continue a previous conversation with `claude --continue` or `claude --resume`
+
+Regardless of how the input arrives, it enters the same pipeline.
+The input method only affects what happens around the edges: whether the UI renders interactively, whether permission prompts appear, and whether the output streams to stdout or a terminal widget.
+
+==== Step 2: Context Assembly
+
+Before the prompt reaches the model, Claude Code constructs a rich context window.
+This is not just your message -- it is your message wrapped in layers of environmental information that give the model situational awareness.
+
+Two context blocks are prepended to every API call:
+
+*System Context* (injected as the system prompt)::
+* Current git information: branch name, recent commits, working tree status
+* Current date and time
+* Cache-breaking injections to prevent stale responses
+* Available tools and their schemas
+* This block is *skipped in remote mode* (when Claude Code runs as a backend service)
+
+*User Context* (injected into the conversation)::
+* `CLAUDE.md` memory files loaded from a four-level hierarchy:
+** `~/.claude/CLAUDE.md` -- global, user-level instructions
+** `~/project/CLAUDE.md` -- project root instructions
+** `~/project/.claude/CLAUDE.md` -- project-level (alternative location)
+** `~/project/subdir/CLAUDE.md` -- directory-specific instructions
+* These files are *memoized per conversation* -- loaded once and cached for the duration of the session
+
+The result is a prompt that looks nothing like what you typed.
+Your simple question arrives at the model surrounded by hundreds of tokens of context that orient it to your project, your preferences, and your current state.
+
+==== Step 3: Model Reasoning
+
+The assembled context hits the Claude API.
+The model analyzes the full prompt -- your message, the system context, and the conversation history -- and decides what to do.
+
+This is where tool selection happens.
+The model does not just generate text; it can emit structured *tool calls* as part of its response.
+Each tool call specifies a tool name and parameters, such as "read the file at path X" or "run this bash command."
+
+The model may decide to:
+
+* Call a single tool (e.g., write a file)
+* Call multiple tools in sequence (planned as a chain of reasoning)
+* Respond with text only (no tools needed)
+
+The key insight: the model is making *autonomous decisions* about what actions to take.
+You did not tell it which tools to use.
+It figured that out from the task description and the available tool set.
+
+==== Step 4: Permission Evaluation
+
+Before any tool executes, Claude Code checks whether it is allowed to run.
+Every tool has a `checkPermissions` method that returns one of three verdicts:
+
+* *Allow* -- the tool runs immediately with no user interaction
+* *Ask* -- the user is prompted to approve or deny the action
+* *Deny* -- the tool is rejected outright and an error is returned to the model
+
+The permission outcome depends on the current permission mode and any rules defined in your settings.
+Read operations (like reading a file or running a search) are typically allowed.
+Write operations (like editing a file or running a shell command) often require approval.
+
+This is a critical safety layer.
+The model can reason about any action it wants, but it cannot execute anything without passing through this gate.
+We cover the permission system in depth in xref:04-permissions-trust.adoc[Module 4: Permissions & Trust].
+
+==== Step 5: Tool Execution
+
+Approved tools execute in your local environment.
+This is real execution -- files are written, commands run, searches performed -- all within your terminal process.
+There is no remote sandbox.
+The tool runs, produces output (stdout, stderr, file contents, search results), and that output is captured.
+
+The captured output becomes a *tool result* message that is appended to the conversation history.
+This is the observation that feeds the next reasoning step.
+
+==== Step 6: Loop Continuation
+
+The model now receives the tool result and makes another decision: is the task complete, or is more work needed?
+
+If more work is needed, execution jumps back to *Step 3*.
+The model reasons again, potentially calling another tool, and the cycle repeats.
+This continues until the model determines the task is finished and emits a final text response.
+
+This is what makes Claude Code an *agent* rather than a chatbot.
+A chatbot responds once.
+An agent acts, observes, reasons, and acts again -- as many times as necessary.
+
+=== The Context Assembly Pipeline
+
+The context assembly step deserves a closer look because it determines what the model knows when it starts reasoning.
+
+[mermaid]
+....
+graph LR
+    subgraph System["System Context"]
+        G["Git branch & status"]
+        D["Current date"]
+        T["Tool schemas"]
+        CB["Cache breaker"]
+    end
+    subgraph User["User Context"]
+        M1["~/.claude/CLAUDE.md"]
+        M2["project/CLAUDE.md"]
+        M3["project/.claude/CLAUDE.md"]
+        M4["subdir/CLAUDE.md"]
+    end
+    System --> API["Claude API Call"]
+    User --> API
+    P["User Prompt + History"] --> API
+....
+
+The system context is assembled fresh for each API call.
+Git status can change between iterations of the loop (because a previous tool call may have modified files or created commits), so it must be re-read.
+
+The user context (CLAUDE.md files) is memoized.
+Claude Code reads them once at the start of the conversation and caches the result.
+If you edit a CLAUDE.md file mid-conversation, the changes will not take effect until you start a new session.
+
+This two-tier approach balances freshness (git status is always current) with efficiency (memory files do not require repeated disk reads).
+
+=== Why It Loops
+
+If you have used a standard chat interface with Claude, you are accustomed to a single request-response exchange.
+Claude Code breaks this model fundamentally.
+
+A single user prompt can trigger *dozens* of API calls.
+Consider what happens when you ask Claude Code to "add input validation to the user registration endpoint":
+
+1. *Read* the current endpoint code
+2. *Read* the Pydantic models used for request/response
+3. *Read* any existing validation patterns in the codebase
+4. *Edit* the endpoint to add validation
+5. *Edit* the models if needed
+6. *Run* the test suite to verify nothing broke
+7. *Read* test output and fix any failures
+8. *Run* tests again to confirm the fix
+
+Each of these is a separate tool call, each triggering a new API call with the accumulated conversation history.
+The model sees the result of each action before deciding on the next one.
+It is not following a predetermined script -- it is *reacting* to what it observes.
+
+This is the fundamental difference between a code generator and a coding agent.
+A generator produces output.
+An agent pursues an objective through iterative action and observation.
+
+=== Operating Modes
+
+Claude Code runs in three distinct modes, each using the same agentic loop but with different interfaces:
+
+==== Interactive REPL
+
+The default mode.
+You launch `claude` in your terminal and interact through a live UI with streaming output, permission prompts, and rich formatting.
+The full six-step cycle runs with all safety checks and user interaction points.
+
+[source,bash]
+----
+claude
+----
+
+==== Non-Interactive Print Mode
+
+For automation and scripting.
+Input arrives via stdin or the `--print` flag.
+Output goes to stdout as plain text.
+Permission prompts are suppressed -- only pre-approved tools run.
+This mode is useful for CI pipelines, git hooks, and shell scripts.
+
+[source,bash]
+----
+echo "explain what this project does" | claude --print
+claude --print "list all TODO comments in src/"
+----
+
+==== Sub-Agents (Task/Agent Tool)
+
+Claude Code can spawn child instances of itself.
+The parent agent delegates a sub-task to a new agent that runs in its own context, executes its own agentic loop, and returns the result.
+This enables parallel execution and task decomposition.
+We cover this in detail in xref:09-multi-agent.adoc[Module 9: Multi-Agent Patterns].
+
+=== Storage and Sessions
+
+Every conversation is stored as a JSON transcript with a unique session ID.
+These transcripts live in `~/.claude/` and contain the full conversation history: every message, every tool call, every tool result.
+
+For long conversations, Claude Code performs *automatic compaction*.
+When the conversation history grows too large for the context window, older messages are summarized to make room for new ones.
+This means a long-running session can continue indefinitely without hitting context limits, though older details are progressively compressed.
+
+Session IDs enable two important features:
+
+* *Resume* (`claude --resume`) -- pick up a previous conversation exactly where you left off
+* *Continue* (`claude --continue`) -- continue the most recent conversation
+
+The transcript files are also what `claude-code-transcripts` reads when you inspect session data -- which you are about to do.
+
+'''
+
+== Part 2: See It In Action
+
+Theory is useful.
+Observation is better.
+In this section, you will run Claude Code, watch the agentic loop in action, and inspect the underlying data.
+
+=== Exercise 1: Watch the Loop
+
+Run a simple task and pay attention to what Claude Code shows you in the terminal.
+
+[source,bash]
+----
+claude "create a file called hello.py that prints hello world"
+----
+
+Watch the output carefully.
+You should see several distinct phases:
+
+1. *Reasoning* -- Claude describes what it plans to do
+2. *Tool selection* -- a tool call appears (likely `Write` or `Bash`)
+3. *Permission check* -- you may be prompted to approve the file creation
+4. *Execution* -- the tool runs and the file is created
+5. *Verification* -- Claude may read the file back to confirm it was created correctly
+6. *Completion* -- Claude summarizes what it did
+
+[TIP]
+====
+Count the tool calls.
+Even for this trivial task, Claude Code likely made at least two: one to write the file and one to verify it exists.
+Each of those was a separate iteration of the agentic loop.
+====
+
+Verify the result:
+
+[source,bash]
+----
+python3 hello.py
+----
+
+Clean up when done:
+
+[source,bash]
+----
+rm hello.py
+----
+
+=== Exercise 2: Replay with Transcripts
+
+Now inspect what actually happened under the hood using `claude-code-transcripts`.
+
+[source,bash]
+----
+claude-transcripts list --limit 5
+----
+
+This shows your most recent sessions.
+Find the session from Exercise 1 and view it:
+
+[source,bash]
+----
+claude-transcripts view <session-id>
+----
+
+Walk through the transcript and identify:
+
+* *Context assembly* -- look for the system prompt content at the beginning of the session. You should see git information, available tools, and date stamps.
+* *Tool calls* -- each tool call appears as a structured block with a tool name and parameters. Note what tool was selected and what arguments were passed.
+* *Tool results* -- after each tool call, the result is captured. This is the observation that fed the next reasoning step.
+* *Loop continuation* -- look for the point where the model decided to call another tool versus emit a final response. What triggered that decision?
+
+[TIP]
+====
+If the transcript is long, pipe it through a pager: `claude-transcripts view <session-id> | less`
+====
+
+=== Exercise 3: Multi-Tool Loops
+
+Now trigger a more complex interaction that requires multiple tools.
+
+[source,bash]
+----
+claude "read the file /etc/hostname, tell me what it contains, then create a file called my-host.txt with that hostname in uppercase"
+----
+
+This task requires Claude Code to:
+
+1. Read a file (Read tool)
+2. Process the content (model reasoning)
+3. Write a new file (Write tool)
+4. Possibly verify the result (Read tool again)
+
+After completion, inspect the transcript:
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+Count the tool calls.
+Map each one to the six-step cycle:
+
+* Which step triggered each tool call?
+* What did the model observe after each execution?
+* At what point did it decide the task was complete?
+
+Clean up:
+
+[source,bash]
+----
+rm my-host.txt
+----
+
+=== Exercise 4: Non-Interactive Mode
+
+Run Claude Code in print mode and compare the behavior:
+
+[source,bash]
+----
+echo "explain what uv is in two sentences" | claude --print
+----
+
+Now inspect this session's transcript alongside a previous interactive session:
+
+[source,bash]
+----
+claude-transcripts list --limit 5
+----
+
+Note the differences:
+
+* *No permission prompts* -- print mode does not ask for approval
+* *Plain text output* -- no rich terminal formatting
+* *Reduced tool usage* -- for a pure explanation task, the model may not call any tools at all
+* *Context assembly differences* -- compare the system prompt in print mode versus interactive mode
+
+[TIP]
+====
+Print mode is not just "quiet mode."
+It changes the permission model and output format.
+Tools that require approval in interactive mode will be skipped entirely in print mode unless pre-approved.
+====
+
+'''
+
+== Part 3: Build With It
+
+Time to apply what you have learned.
+You will use Claude Code to scaffold the project that you will build throughout this course: a Personal Learning Path Manager.
+
+=== Scaffold the Learning Asset Manager
+
+Create the project directory:
+
+[source,bash]
+----
+mkdir -p ~/learnpath
+cd ~/learnpath
+----
+
+Now ask Claude Code to scaffold the project.
+Watch the agentic loop as it works:
+
+[source,bash]
+----
+claude "initialize a Python 3.13 project using uv with FastAPI and Pydantic V2. Create the project structure with a src/learnpath package, pyproject.toml, and a basic health check endpoint at /health."
+----
+
+Observe what happens.
+Claude Code will likely:
+
+1. Run `uv init` or create `pyproject.toml` directly
+2. Create the `src/learnpath/` package directory structure
+3. Write `__init__.py` files
+4. Write the FastAPI application with a `/health` endpoint
+5. Add dependencies to `pyproject.toml`
+6. Possibly run `uv sync` to install dependencies
+7. Possibly test the endpoint
+
+Each of these actions is a tool call.
+Each tool call is an iteration of the agentic loop.
+
+Verify the result:
+
+[source,bash]
+----
+cd ~/learnpath
+uv run uvicorn src.learnpath.main:app --host 0.0.0.0 --port 8000
+----
+
+In another terminal:
+
+[source,bash]
+----
+curl http://localhost:8000/health
+----
+
+You should get a JSON response indicating the service is healthy.
+
+=== Transcript Review
+
+Review the scaffolding transcript to solidify your understanding of the agentic loop:
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+Answer these questions as you read through:
+
+1. *How many agentic loop iterations occurred?* Count every tool call -- each one represents a full cycle through steps 3-6.
+
+2. *What was the tool selection order?* List the tools in the order they were called. Did Claude Code follow a logical sequence? Did it read before writing? Did it verify after creating?
+
+3. *When did Claude decide it was "done"?* Look at the final tool result and the model's last message. What signal told it the task was complete -- was it a successful command output, a file verification, or simply an assessment that all requested items were created?
+
+4. *Were there any corrections?* Did Claude Code encounter an error and retry? If so, that is the loop at its most powerful -- the model observed a failure, reasoned about the cause, and took corrective action without your intervention.
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* A working `~/learnpath` project with a FastAPI health check endpoint
+* At least two exported transcripts you can reference
+* An understanding of the six-step agentic loop from both theory and observation
+
+*Verify:* `cd ~/learnpath && uv run uvicorn src.learnpath.main:app --host 0.0.0.0 --port 8000` serves a response at `/health`
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation] -- the primary reference for Claude Code features and configuration
+* {claude-code-transcripts-url}[claude-code-transcripts] -- the CLI tool used throughout this course for session introspection
+* Local architecture reference: `assets/site/concepts/how-it-works.html` in this course repository
+
+'''
+
+Next: xref:02-context-memory.adoc[Module 2: Context & Memory]

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Installation - Claude Code Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="index.html">Introduction</a>
+  <a href="quickstart.html">Quickstart</a>
+  <a href="installation.html" class="active">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="concepts/how-it-works.html">How It Works</a>
+  <a href="concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="concepts/permissions.html">Permissions</a>
+  <a href="concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="configuration/claudemd.html">CLAUDE.md</a>
+  <a href="configuration/environment-variables.html">Environment Variables</a>
+  <a href="configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="guides/authentication.html">Authentication</a>
+  <a href="guides/hooks.html">Hooks</a>
+  <a href="guides/mcp-servers.html">MCP Servers</a>
+  <a href="guides/multi-agent.html">Multi-Agent</a>
+  <a href="guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="reference/commands/overview.html">Overview</a>
+  <a href="reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="reference/tools/bash.html">Bash</a>
+  <a href="reference/tools/file-operations.html">File Operations</a>
+  <a href="reference/tools/search.html">Search</a>
+  <a href="reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="reference/sdk/overview.html">Overview</a>
+  <a href="reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Getting Started / Installation</div>
+  </div>
+  <div class="content">
+
+<h1>Installation</h1>
+<p class="page-desc">Claude Code is Anthropic's official CLI tool available for macOS, Linux, and Windows (via WSL), requiring Node.js 18+.</p>
+
+<h2>Core Requirements</h2>
+<p>Node.js 18 or higher with npm included. Verify:</p>
+<pre><code>node --version
+npm --version</code></pre>
+
+<h2>Install</h2>
+<pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
+<p>Verify:</p>
+<pre><code>claude --version</code></pre>
+
+<h2>Platform-Specific Notes</h2>
+<h3>macOS</h3>
+<p>Potential permission issues with npm global installs. Use nvm/fnm or configure npm prefix to avoid <code>sudo</code>.</p>
+
+<h3>Linux</h3>
+<p>Avoid <code>sudo</code> for npm installs. Use nvm or adjust npm prefix.</p>
+
+<h3>Windows</h3>
+<p>Must use WSL, not Command Prompt or PowerShell. Steps:</p>
+<ol>
+  <li>Install WSL</li>
+  <li>Launch Ubuntu</li>
+  <li>Install Node.js via nvm</li>
+  <li>Install Claude Code</li>
+</ol>
+<p>Project files should live inside the WSL filesystem.</p>
+
+<h2>Maintenance</h2>
+<pre><code>npm update -g @anthropic-ai/claude-code
+# or
+claude update</code></pre>
+<p>Uninstall:</p>
+<pre><code>npm uninstall -g @anthropic-ai/claude-code</code></pre>
+
+<h2>Common Issues</h2>
+<ul>
+  <li>PATH configuration</li>
+  <li>Outdated Node.js</li>
+  <li>Permission errors</li>
+  <li>Auth failures</li>
+  <li>Docker/CI deployments</li>
+</ul>
+<p>Auth can use OAuth or API key from Anthropic Console.</p>
+
+<div class="page-nav">
+  <a href="quickstart.html" class="prev"><span class="label">Previous</span><span class="title">Quickstart</span></a>
+  <a href="concepts/how-it-works.html" class="next"><span class="label">Next</span><span class="title">How It Works</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

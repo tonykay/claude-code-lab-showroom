@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory &amp; Context - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="how-it-works.html">How It Works</a>
+  <a href="memory-context.html" class="active">Memory &amp; Context</a>
+  <a href="permissions.html">Permissions</a>
+  <a href="tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../guides/authentication.html">Authentication</a>
+  <a href="../guides/hooks.html">Hooks</a>
+  <a href="../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Concepts / Memory &amp; Context</div>
+  </div>
+  <div class="content">
+
+<h1>Memory &amp; Context</h1>
+<p class="page-desc">Claude Code uses a 4-level memory hierarchy to load instructions from markdown files.</p>
+
+<h2>Priority System</h2>
+<p>Later files have higher precedence:</p>
+<ol>
+  <li><strong>Managed memory</strong> (<code>/etc/claude-code/CLAUDE.md</code>) &mdash; System-wide administrator settings</li>
+  <li><strong>User memory</strong> (<code>~/.claude/CLAUDE.md</code>) &mdash; Personal global preferences</li>
+  <li><strong>Project memory</strong> (<code>CLAUDE.md</code>, <code>.claude/CLAUDE.md</code>) &mdash; Team conventions</li>
+  <li><strong>Local memory</strong> (<code>CLAUDE.local.md</code>) &mdash; Private project overrides (git-ignored)</li>
+</ol>
+<blockquote>Files closer to the current working directory are loaded later and therefore have higher priority.</blockquote>
+
+<h2>File Discovery</h2>
+<p>Walks from CWD up to filesystem root, collecting at each level. Cached for conversation; use <code>/memory</code> to reload.</p>
+
+<h2>@include Directive</h2>
+<p>Reference other files using @ notation:</p>
+<pre><code>@./docs/architecture.md</code></pre>
+<p>Supports relative, home, and absolute paths. Circular references are detected; maximum depth is 5.</p>
+
+<h2>Granular Rules</h2>
+<p>Use <code>.claude/rules/*.md</code> with path-scoped frontmatter:</p>
+<pre><code>---
+paths:
+  - "src/api/**"
+---</code></pre>
+
+<h2>Best Practices</h2>
+<ul>
+  <li><strong>Managed:</strong> Org policies, security guardrails</li>
+  <li><strong>User:</strong> Personal preferences across projects</li>
+  <li><strong>Project:</strong> Team conventions (testing, builds, architecture)</li>
+  <li><strong>Local:</strong> Personal workflow tweaks</li>
+</ul>
+<p>Max recommended: 40,000 characters per file.</p>
+
+<div class="page-nav">
+  <a href="how-it-works.html" class="prev"><span class="label">Previous</span><span class="title">How It Works</span></a>
+  <a href="permissions.html" class="next"><span class="label">Next</span><span class="title">Permissions</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

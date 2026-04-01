@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Permissions API - Claude Code Documentation</title>
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../../index.html">Introduction</a>
+  <a href="../../quickstart.html">Quickstart</a>
+  <a href="../../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../../concepts/how-it-works.html">How It Works</a>
+  <a href="../../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../../concepts/permissions.html">Permissions</a>
+  <a href="../../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../../guides/authentication.html">Authentication</a>
+  <a href="../../guides/hooks.html">Hooks</a>
+  <a href="../../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../commands/overview.html">Overview</a>
+  <a href="../commands/cli-flags.html">CLI Flags</a>
+  <a href="../commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../tools/bash.html">Bash</a>
+  <a href="../tools/file-operations.html">File Operations</a>
+  <a href="../tools/search.html">Search</a>
+  <a href="../tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="overview.html">Overview</a>
+  <a href="hooks-reference.html">Hooks Reference</a>
+  <a href="permissions-api.html" class="active">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Reference / SDK / Permissions API</div>
+  </div>
+  <div class="content">
+
+<h1>Permissions API</h1>
+<p class="page-desc">Programmatic control over Claude Code's permission system.</p>
+
+<h2>Five Modes</h2>
+<ul>
+  <li><code>default</code></li>
+  <li><code>acceptEdits</code></li>
+  <li><code>bypassPermissions</code></li>
+  <li><code>plan</code></li>
+  <li><code>dontAsk</code></li>
+</ul>
+
+<h2>Configuration Methods</h2>
+<ul>
+  <li>CLI flags</li>
+  <li>Settings files</li>
+  <li><code>/permissions</code> command</li>
+  <li>SDK control requests</li>
+</ul>
+
+<h2>Rules</h2>
+<p>Pattern matching with:</p>
+<ul>
+  <li>Glob for bash commands</li>
+  <li>Absolute paths for files</li>
+  <li><code>mcp__servername</code> for MCP tools</li>
+  <li><code>Agent(Explore)</code> for agent types</li>
+</ul>
+<p>Deny rules always supersede allow rules.</p>
+
+<h2>Decision Pipeline</h2>
+<ol>
+  <li>Deny rules</li>
+  <li>Ask rules</li>
+  <li>Tool checks</li>
+  <li>Safety checks</li>
+  <li>Mode evaluation</li>
+  <li>Allow rules</li>
+  <li>Default behavior</li>
+</ol>
+
+<h2>Protected Directories</h2>
+<p><code>.git/</code>, <code>.claude/</code>, <code>.vscode/</code> always trigger prompts even in bypass mode.</p>
+
+<h2>SDK Integration</h2>
+<p><code>PermissionUpdate</code> objects modify rules across scopes.</p>
+
+<div class="page-nav">
+  <a href="hooks-reference.html" class="prev"><span class="label">Previous</span><span class="title">Hooks Reference</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

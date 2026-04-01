@@ -1,0 +1,592 @@
+= Module 7: Extending Claude Code
+:navtitle: Extending Claude Code
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-6 complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, hooks, and skills
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, CRUD API endpoints, and custom skills
+* `CLAUDE.md` and `.claude/settings.json` configured with permission rules, hooks, and skills from Modules 4-6
+====
+
+'''
+
+== Part 1: How It Works
+
+Modules 5 and 6 introduced two extension mechanisms: hooks (automatic lifecycle events) and skills (invocable workflows).
+This module zooms out to the full extension model -- how Claude Code functions as a platform, not just a tool, and how the ecosystem around it enables workflows that no single configuration could achieve alone.
+
+=== The Extension Model
+
+Claude Code exposes multiple extension points that compose together.
+You have already built with most of them:
+
+[cols="1,1,2",options="header"]
+|===
+|Extension Point |Module |What It Does
+
+|`CLAUDE.md`
+|Module 2
+|Persistent rules, conventions, and project context loaded into every session
+
+|Permission rules
+|Module 4
+|Control which tools can execute and under what conditions
+
+|Hooks
+|Module 5
+|Automatic lifecycle event handlers that fire before/after tool calls, on session start/stop
+
+|Skills
+|Module 6
+|Invocable, markdown-based workflows with arguments, namespacing, and inline shell commands
+
+|MCP Servers
+|Module 8 (next)
+|External service integrations that expose new tools to Claude Code
+
+|Settings
+|Modules 4-5
+|`.claude/settings.json` for permissions, hooks, and behavior configuration
+|===
+
+These extension points are composable.
+A skill can rely on permission rules to gate dangerous operations.
+A hook can enforce conventions that skills assume.
+An MCP server can provide tools that skills invoke.
+`CLAUDE.md` ties everything together with project-wide context.
+
+[mermaid]
+....
+flowchart TD
+    subgraph core["Claude Code Core"]
+        AL["Agentic Loop"]
+        TD["Tool Dispatch"]
+        CA["Context Assembly"]
+    end
+
+    subgraph extensions["Extension Points"]
+        CM["CLAUDE.md<br/>Rules & Context"]
+        PR["Permission Rules<br/>Access Control"]
+        HK["Hooks<br/>Lifecycle Events"]
+        SK["Skills<br/>Workflows"]
+        MCP["MCP Servers<br/>External Tools"]
+        ST["Settings<br/>Configuration"]
+    end
+
+    CM --> CA
+    PR --> TD
+    HK --> TD
+    SK --> AL
+    MCP --> TD
+    ST --> core
+
+    style core fill:#e8f4f8,stroke:#2c3e50
+    style extensions fill:#fef9e7,stroke:#2c3e50
+....
+
+The key insight: each extension point addresses a different concern.
+Rules tell Claude _what_ to do.
+Permissions tell it _what it may_ do.
+Hooks tell it _what happens automatically_.
+Skills tell it _how_ to do complex workflows.
+MCP servers tell it _what external services are available_.
+Settings wire it all together.
+
+=== Skills Frameworks vs Individual Skills
+
+In Module 6, you built individual skills: `/db:migrate`, `/api:scaffold-endpoint`, `/test:coverage`.
+Each solves one problem in isolation.
+
+A *skills framework* is a coordinated set of skills designed to work together as a pipeline.
+Where individual skills are standalone tools, a framework is a methodology encoded as skills.
+
+The difference:
+
+* *Individual skills:* Each skill is self-contained. `/db:migrate` does not know about `/test:coverage`. You decide when to invoke each one and in what order.
+* *Skills framework:* Skills are aware of each other. A brainstorming skill ends by suggesting the planning skill. A planning skill produces output structured for the execution skill. The framework defines a workflow that flows through multiple skills.
+
+Think of individual skills as separate hand tools.
+A skills framework is a workshop with tools arranged for a specific type of work, where each tool's output feeds the next.
+
+=== The Superpowers Framework
+
+Superpowers is a comprehensive development workflow framework distributed as a skills package.
+It encodes a structured software development methodology into a chain of interconnected skills.
+
+The framework provides these skills:
+
+[cols="1,2",options="header"]
+|===
+|Skill |Purpose
+
+|`/superpowers:brainstorming`
+|Structured design exploration before writing code -- asks questions, presents approaches, evaluates tradeoffs
+
+|`/superpowers:writing-plans`
+|Detailed implementation plans with file maps, TDD steps, and commit checkpoints
+
+|`/superpowers:executing-plans`
+|Plan execution with review checkpoints in a separate session
+
+|`/superpowers:subagent-driven-development`
+|Parallel plan execution using dispatched subagents for independent tasks
+
+|`/superpowers:test-driven-development`
+|TDD discipline -- write tests first, then implement until tests pass
+
+|`/superpowers:systematic-debugging`
+|Structured debugging that gathers evidence before proposing fixes
+
+|`/superpowers:requesting-code-review`
+|Request a code review that verifies work meets requirements
+
+|`/superpowers:receiving-code-review`
+|Process code review feedback with technical rigor, not blind agreement
+
+|`/superpowers:finishing-a-development-branch`
+|Branch completion -- guides merge, PR, or cleanup decisions
+
+|`/superpowers:verification-before-completion`
+|Evidence-before-assertions -- requires running verification commands before claiming success
+
+|`/superpowers:using-git-worktrees`
+|Isolated feature work using git worktrees with safety verification
+
+|`/superpowers:dispatching-parallel-agents`
+|Dispatch independent tasks to parallel agents when no shared state is needed
+|===
+
+==== The Superpowers Chain
+
+The skills chain together into a development workflow:
+
+[mermaid]
+....
+flowchart LR
+    B["/brainstorming<br/>Design exploration"] --> P["/writing-plans<br/>Implementation plan"]
+    P --> E["/executing-plans<br/>Plan execution"]
+    P --> S["/subagent-driven-development<br/>Parallel execution"]
+    E --> T["/test-driven-development<br/>TDD cycles"]
+    S --> T
+    T --> R["/requesting-code-review<br/>Review request"]
+    R --> RC["/receiving-code-review<br/>Process feedback"]
+    RC --> V["/verification-before-completion<br/>Evidence check"]
+    V --> F["/finishing-a-development-branch<br/>Merge or PR"]
+
+    style B fill:#e8f4f8,stroke:#2c3e50
+    style F fill:#d5f5e3,stroke:#2c3e50
+....
+
+Each skill in the chain:
+
+1. *Consumes output from the previous skill.* The planning skill expects the design decisions from brainstorming. The execution skill expects the structured plan from planning.
+2. *Produces structured output for the next skill.* Brainstorming ends by recommending the planning skill. Plans are structured with TDD steps that the execution skill follows.
+3. *Enforces discipline at its stage.* The TDD skill does not allow implementation before tests. The verification skill does not allow success claims before evidence.
+
+This chaining is not enforced mechanically -- the skills _recommend_ the next step.
+The developer retains control and can skip stages or revisit earlier ones.
+But the framework makes it easy to follow a disciplined workflow and hard to accidentally skip important steps.
+
+==== Installing Superpowers
+
+Superpowers installs as a skills package.
+Follow the installation instructions in the Superpowers repository to add it to your Claude Code configuration.
+
+Once installed, the skills appear in your slash command list.
+Type `/superpowers:` and tab-complete to see all available skills.
+
+=== Skills Marketplaces
+
+Individual skills and frameworks can be distributed through marketplaces -- curated repositories where teams publish and discover reusable skills.
+
+The {claude-code-docs-url}[Claude Code documentation] describes how skills can be shared across projects and teams.
+
+Organizations can create internal skills marketplaces:
+
+* A Git repository containing skill directories with `SKILL.md` files
+* A catalog or index listing available skills, their purposes, and installation instructions
+* Version management so teams can pin to known-good skill versions
+
+The https://github.com/rhpds/rhdp-skills-marketplace[RHDP Skills Marketplace] is one example of an organizational skills repository.
+It contains skills contributed by multiple teams, organized by domain, with descriptions and usage examples.
+
+Community-contributed skills follow the same pattern.
+Anyone can publish a skill by sharing a directory containing a `SKILL.md` file.
+The barrier to creating and sharing skills is intentionally low -- it is just a markdown file with frontmatter.
+
+=== The Ecosystem
+
+Beyond skills and frameworks, a growing ecosystem of tools extends what you can do with Claude Code.
+
+==== Session Analysis
+
+{claude-code-transcripts-url}[claude-code-transcripts] by Simon Willison is a CLI tool that lets you review Claude Code session transcripts.
+It renders the full conversation -- prompts, tool calls, results, reasoning -- in a readable format.
+
+This is valuable for:
+
+* *Learning:* Reviewing past sessions to understand what Claude Code actually did
+* *Debugging:* Finding where a session went wrong
+* *Team knowledge sharing:* Sharing how a complex task was accomplished
+* *Auditing:* Reviewing what tools were called and what changes were made
+
+With the architectural knowledge from Modules 1-6, transcript analysis becomes especially powerful.
+You can now identify context assembly patterns, tool dispatch decisions, permission checks, and hook executions in the raw session data.
+
+==== Community Resources
+
+[cols="1,1,2",options="header"]
+|===
+|Resource |Type |Description
+
+|{claude-code-transcripts-url}[claude-code-transcripts]
+|CLI tool
+|Session replay and analysis -- render Claude Code transcripts in readable format
+
+|{claude-howto-url}[claude-howto]
+|Guide collection
+|Community-contributed how-to guides for common Claude Code workflows
+
+|{claude-code-tips-url}[claude-code-tips]
+|Tips collection
+|Practical tips and patterns for effective Claude Code usage
+
+|Community MCP servers
+|Integrations
+|Filesystem, fetch, database, and API integrations (covered in Module 8)
+
+|IDE integrations
+|Extensions
+|VS Code and JetBrains plugins for Claude Code integration
+|===
+
+==== IDE Integrations
+
+Claude Code integrates with major IDEs:
+
+* *VS Code:* The Claude Code extension provides inline access to Claude Code within the editor. You can invoke skills, review suggestions, and manage sessions without leaving VS Code.
+* *JetBrains:* Similar integration for IntelliJ IDEA, PyCharm, and other JetBrains IDEs.
+
+These integrations bring Claude Code's capabilities directly into your existing development workflow rather than requiring a separate terminal.
+
+=== Evaluating Extensions Safely
+
+Skills, frameworks, and MCP servers run with significant access to your system.
+Before installing any third-party extension, apply these evaluation criteria:
+
+==== Skills and Frameworks
+
+* *Read the `SKILL.md` before installing.* Skills are markdown files -- you can read exactly what instructions Claude will follow. Look for inline shell commands (`!command`) that execute on your system.
+* *Check for `allowed-tools` restrictions.* Well-designed skills limit which tools they can use. A skill that needs only `Bash` and `Read` should say so in its frontmatter.
+* *Look for scope creep.* A skill named "format-code" should not be making API calls or modifying files outside the project.
+* *Verify the source.* Skills from organizational marketplaces with review processes are safer than anonymous downloads.
+
+==== MCP Servers
+
+* *MCP servers have their own permission boundaries.* Each server exposes specific tools, and Claude Code's permission rules still apply to those tools.
+* *Review server documentation.* Understand what data the server accesses and what operations it can perform.
+* *Prefer well-maintained servers.* Community MCP servers vary in quality. Check for recent commits, documentation, and issue responsiveness.
+
+==== General Practices
+
+* *Version pin your extensions.* Use specific commits or tags rather than tracking the latest version.
+* *Test in a non-production environment first.* Try new skills and servers on a test project before adding them to critical workflows.
+* *Review updates before applying.* When updating skills or servers, read the diff to understand what changed.
+
+[WARNING]
+====
+Skills run with Claude Code's full permissions.
+A malicious skill could read, modify, or delete any file that Claude Code can access.
+Treat installing a third-party skill with the same caution you would treat running a third-party shell script.
+====
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Install and Explore Superpowers
+
+Install the Superpowers framework following the instructions in its repository.
+
+Once installed, discover the available skills:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Inside the Claude Code session, type `/superpowers:` and press Tab to see all available skills.
+You should see the full list: `brainstorming`, `writing-plans`, `executing-plans`, `test-driven-development`, and more.
+
+Read a few skill definitions to understand how they chain:
+
+[source,bash]
+----
+# Outside Claude Code, examine the skill files directly
+find ~/.claude/skills -path "*/superpowers/*" -name "SKILL.md" | head -5 | while read f; do
+  echo "=== $f ==="
+  head -20 "$f"
+  echo
+done
+----
+
+Notice how skills reference each other.
+The brainstorming skill's instructions end by recommending the planning skill.
+The planning skill produces output structured for the execution skill.
+
+=== Exercise 2: The Brainstorming Workflow
+
+Start a brainstorming session for a small feature:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/superpowers:brainstorming add a search endpoint to the learnpath API"
+----
+
+Observe the structured conversation:
+
+1. *Questions phase:* The skill asks clarifying questions about what "search" means for your API. What entities are searchable? What fields? Full-text or exact match?
+2. *Approaches phase:* It presents multiple approaches -- query parameter filtering, dedicated search endpoint, full-text search with PostgreSQL -- with tradeoffs for each.
+3. *Design presentation:* It synthesizes the discussion into a concrete design recommendation.
+4. *Handoff:* It suggests invoking `/superpowers:writing-plans` to turn the design into an implementation plan.
+
+Compare this to what would happen with an ad-hoc prompt like "add search to the API."
+The brainstorming skill forces you to think through design decisions before writing code.
+
+=== Exercise 3: The Planning Workflow
+
+Take the brainstorming output and invoke the planning skill:
+
+[source,bash]
+----
+claude "/superpowers:writing-plans"
+----
+
+Observe the plan structure:
+
+* *File map:* Which files will be created or modified, and why
+* *TDD steps:* Tests to write first, then implementation to make them pass
+* *Commit checkpoints:* Logical points to commit progress
+* *Dependencies:* What must happen before what
+
+Compare this structured plan to what you would get by asking Claude "OK, now implement it."
+The plan makes the work visible, reviewable, and resumable.
+If you lose your session, the plan persists and a new session can pick up where the previous one left off.
+
+=== Exercise 4: Transcript Retrospective
+
+If you have `claude-code-transcripts` installed, use it to review transcripts from earlier modules:
+
+[source,bash]
+----
+# List recent sessions
+claude-code-transcripts list
+
+# View a specific session transcript
+claude-code-transcripts view <session-id>
+----
+
+With six modules of architectural knowledge, revisit a transcript from Module 1 or Module 3.
+Look for patterns you could not identify before:
+
+* *Context assembly:* Can you see where `CLAUDE.md` content was loaded? Where file contents were injected into context?
+* *Tool dispatch:* Can you trace the decision from "user asked X" to "Claude called tool Y"?
+* *Permission checks:* Can you see where permission rules were evaluated?
+* *Hook executions:* Can you identify where hooks fired before or after tool calls?
+
+This retrospective exercise is the payoff for learning the architecture.
+The transcript is no longer opaque -- it is a trace of the agentic loop, context assembly, tool dispatch, and permission evaluation that you now understand.
+
+'''
+
+== Part 3: Build With It
+
+Use the full Superpowers workflow to add asset tagging to the `{project-name}` project.
+This exercise demonstrates how a skills framework transforms ad-hoc development into a disciplined, repeatable process.
+
+=== Step 1: Brainstorm the Design
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/superpowers:brainstorming add asset tagging to the learnpath API"
+----
+
+Guide the brainstorming toward this design:
+
+* *Tags model:* A `Tag` entity with `id` and `name` fields
+* *Many-to-many relationship:* An `asset_tags` association table linking `asset_id` to `tag_id`
+* *API endpoints:*
+** CRUD for tags (`GET /tags/`, `POST /tags/`, `PUT /tags/{id}`, `DELETE /tags/{id}`)
+** Tag an asset (`POST /assets/{id}/tags`)
+** Untag an asset (`DELETE /assets/{id}/tags/{tag_id}`)
+** Search assets by tag (`GET /assets/?tag=<name>`)
+
+The brainstorming skill will help you evaluate tradeoffs:
+
+* Should tags be unique by name? (Yes -- prevents duplicates.)
+* Should deleting a tag remove it from all assets? (Yes -- cascade delete on the association.)
+* Should the search support multiple tags? (Start with single tag, extend later.)
+
+=== Step 2: Create the Implementation Plan
+
+[source,bash]
+----
+claude "/superpowers:writing-plans"
+----
+
+The planning skill should produce a plan with these elements:
+
+* File map listing new files (`schemas/tag.py`, `models/tag.py`, `routers/tags.py`) and modified files (`models/asset.py`, `routers/assets.py`, `main.py`)
+* TDD steps: write tests for tag CRUD first, then tag/untag operations, then search
+* Alembic migration step for the new table and association table
+* Commit checkpoints after each major piece
+
+=== Step 3: Implement with TDD
+
+Execute the plan using TDD discipline:
+
+[source,bash]
+----
+claude "/superpowers:executing-plans"
+----
+
+Or, if you prefer to drive the TDD cycles manually:
+
+[source,bash]
+----
+claude "/superpowers:test-driven-development"
+----
+
+The TDD workflow for each piece:
+
+1. *Write the test:* Create `tests/test_tags.py` with tests for tag CRUD endpoints
+2. *Run and watch it fail:* `uv run pytest tests/test_tags.py -v` -- all tests should fail (no implementation yet)
+3. *Implement:* Create the tag model, schema, and router
+4. *Run and watch it pass:* All tests should pass
+5. *Repeat:* Write tests for tag/untag operations, implement, pass. Write tests for search, implement, pass.
+
+=== Step 4: Code Review
+
+Once the implementation is complete and all tests pass, request a code review:
+
+[source,bash]
+----
+claude "/superpowers:requesting-code-review"
+----
+
+The review skill will check:
+
+* Do all tests pass?
+* Is the implementation consistent with the plan?
+* Are there edge cases not covered by tests?
+* Does the code follow project conventions?
+
+=== Step 5: Compare the Approaches
+
+Reflect on how this Superpowers-guided workflow compares to ad-hoc development in Modules 1-3:
+
+[cols="1,2,2",options="header"]
+|===
+|Aspect |Ad-hoc (Modules 1-3) |Superpowers-guided (Module 7)
+
+|Design phase
+|Implicit -- you start coding and discover design decisions along the way
+|Explicit -- brainstorming forces design decisions before code
+
+|Planning
+|Mental model only -- nothing written, nothing reviewable
+|Written plan with file maps, TDD steps, and commit points
+
+|Test coverage
+|Tests often written after implementation, covering what was built rather than what was needed
+|Tests written first, driving the implementation
+
+|Review
+|Self-review or none
+|Structured review against requirements and plan
+
+|Resumability
+|Lost if you close the session
+|Plan persists -- a new session can continue where you left off
+|===
+
+The Superpowers framework does not give Claude Code new capabilities.
+It structures how existing capabilities are used.
+The discipline comes from the workflow, not the tool.
+
+=== Ecosystem Survey
+
+Create a reference table of useful extensions for your development practice.
+This is your personal index of tools worth evaluating:
+
+[cols="1,1,2,1",options="header"]
+|===
+|Tool |Type |Purpose |URL
+
+|Superpowers
+|Skills framework
+|Structured development workflow: brainstorm, plan, TDD, review
+|Installed as a skills package
+
+|claude-code-transcripts
+|CLI tool
+|Session replay and analysis for learning and debugging
+|{claude-code-transcripts-url}
+
+|claude-howto
+|Guide collection
+|Community how-to guides for common workflows
+|{claude-howto-url}
+
+|claude-code-tips
+|Tips collection
+|Practical tips from experienced users
+|{claude-code-tips-url}
+
+|RHDP Skills Marketplace
+|Skills repository
+|Organizational skills contributed by multiple teams
+|https://github.com/rhpds/rhdp-skills-marketplace
+
+|Community MCP servers
+|Integrations
+|Database, API, filesystem, and fetch integrations
+|Covered in Module 8
+|===
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* Superpowers framework installed and accessible via `/superpowers:` slash commands
+* At least one full brainstorm-plan-implement-review cycle completed
+* Asset tagging feature implemented with TDD: tags model, association table, CRUD endpoints, tag/untag operations, and search by tag
+* All tests passing for the new feature
+
+*Understanding check:* You should be able to:
+
+1. Explain how Claude Code functions as a platform with composable extension points
+2. Describe the difference between individual skills and a skills framework
+3. Walk through the Superpowers chain: brainstorm, plan, implement (TDD), review, finish
+4. Evaluate a third-party skill for safety by reading its `SKILL.md`
+5. Use transcript analysis to trace the agentic loop, tool dispatch, and permission checks
+6. Compare ad-hoc development to a structured skills-framework approach
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session replay and analysis
+* {claude-howto-url}[claude-howto] -- community how-to guides
+* {claude-code-tips-url}[claude-code-tips] -- practical tips
+
+'''
+
+Next: xref:08-mcp-servers.adoc[Module 8: MCP Servers]

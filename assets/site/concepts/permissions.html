@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Permissions - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="how-it-works.html">How It Works</a>
+  <a href="memory-context.html">Memory &amp; Context</a>
+  <a href="permissions.html" class="active">Permissions</a>
+  <a href="tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../guides/authentication.html">Authentication</a>
+  <a href="../guides/hooks.html">Hooks</a>
+  <a href="../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Concepts / Permissions</div>
+  </div>
+  <div class="content">
+
+<h1>Permissions</h1>
+<p class="page-desc">The permission system manages which operations execute automatically vs requiring approval.</p>
+
+<h2>Six Permission Modes</h2>
+<table>
+  <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
+  <tbody>
+    <tr><td><code>default</code></td><td>Evaluates each tool call, prompts for side effects, auto-approves read-only</td></tr>
+    <tr><td><code>acceptEdits</code></td><td>Auto-approves file modifications, prompts for shell</td></tr>
+    <tr><td><code>plan</code></td><td>Analysis only, all writes/bash blocked</td></tr>
+    <tr><td><code>bypassPermissions</code></td><td>Disables all checks (sandboxed environments only)</td></tr>
+    <tr><td><code>dontAsk</code></td><td>Auto-approving in scripted scenarios</td></tr>
+    <tr><td><code>auto</code></td><td>Experimental classifier-based mode (feature flag)</td></tr>
+  </tbody>
+</table>
+
+<h2>Configuration</h2>
+<p>Set via CLI flag, <code>/permissions</code> command, or <code>settings.json</code> files.</p>
+
+<h2>Permission Rules System</h2>
+<p>Allow/deny lists with tool name, optional pattern matching, and behavior. Evaluated before mode. Rules sourced from 5 locations: user, project, local, session, CLI args.</p>
+
+<h2>Bash-Specific Rules</h2>
+<p>Pattern matching with wildcards; compound commands checked independently; most restrictive result applies.</p>
+
+<h2>Safety Recommendations</h2>
+<ul>
+  <li>Start with <code>default</code> mode</li>
+  <li>Use <code>plan</code> for unfamiliar codebases</li>
+  <li>Avoid <code>bypassPermissions</code> in interactive contexts</li>
+</ul>
+
+<div class="page-nav">
+  <a href="memory-context.html" class="prev"><span class="label">Previous</span><span class="title">Memory &amp; Context</span></a>
+  <a href="tools.html" class="next"><span class="label">Next</span><span class="title">Tools</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

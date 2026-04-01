@@ -1,0 +1,541 @@
+= Module 9: Multi-Agent Patterns
+:navtitle: Multi-Agent Patterns
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-8 complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, hooks, skills, the extension model, and MCP servers
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, CRUD API endpoints, tags, custom skills, and a working MCP server
+* `CLAUDE.md` and `.claude/settings.json` configured with permission rules, hooks, and skills from Modules 4-7
+* Python {python-version} and `uv` available
+====
+
+'''
+
+== Part 1: How It Works
+
+Every tool you have used so far -- Bash, Read, Edit, MCP tools -- executes a single operation and returns a result.
+The Agent tool is different.
+It spawns a complete, independent Claude instance that runs its own agentic loop: reasoning, tool use, iteration, and a final result.
+
+This is the mechanism behind multi-agent patterns in Claude Code.
+
+=== The Sub-Agent Model
+
+Claude Code can spawn independent instances of itself using the Agent tool.
+Each sub-agent is a fresh Claude instance with its own agentic loop.
+The parent agent dispatches a task, the sub-agent executes it autonomously, and the result flows back to the parent.
+
+Key properties:
+
+* Each sub-agent is a *fresh Claude instance* -- it starts with no prior conversation
+* Sub-agents have *completely isolated context* -- zero inheritance from the parent
+* Each sub-agent gets its *own tool permissions* based on its type
+* Sub-agents receive *customizable system prompts* based on agent type
+
+[mermaid]
+....
+flowchart TD
+    P["Parent Agent"] -->|"spawns"| A["Sub-Agent A<br/>(isolated context)"]
+    P -->|"spawns"| B["Sub-Agent B<br/>(isolated context)"]
+    A -->|"result"| P
+    B -->|"result"| P
+
+    style P fill:#e8f4f8,stroke:#2c3e50
+    style A fill:#fef9e7,stroke:#2c3e50
+    style B fill:#fef9e7,stroke:#2c3e50
+....
+
+The parent agent remains active while sub-agents work.
+When a sub-agent completes, its result becomes part of the parent's conversation context, and the parent decides what to do next.
+
+=== Zero-Context Isolation
+
+This is the single most important concept in multi-agent patterns.
+
+Sub-agents do *not* inherit the parent's conversation history.
+They do *not* see files the parent has read.
+They do *not* know what tools the parent has called.
+They do *not* have access to any prior reasoning the parent performed.
+
+The sub-agent starts completely blank.
+The only context it has is the prompt the parent sends it.
+
+This is a *feature*, not a limitation.
+Zero-context isolation provides:
+
+* *Focus.* The sub-agent works only on its assigned task, not distracted by the parent's broader concerns.
+* *Context efficiency.* The sub-agent's context window is entirely dedicated to its task, not consumed by the parent's conversation history.
+* *Safety.* A sub-agent cannot accidentally act on stale or irrelevant information from the parent's context.
+* *Predictability.* The sub-agent's behavior depends only on its prompt. Same prompt, same behavior.
+
+The trade-off is real: you must write completely self-contained prompts.
+If the sub-agent needs to know about a file, the prompt must tell it to read that file.
+If the sub-agent needs to understand a constraint, the prompt must state that constraint.
+Nothing is implicit.
+
+=== Agent Tool Parameters
+
+The Agent tool accepts these parameters:
+
+[cols="1,1,3",options="header"]
+|===
+|Parameter |Required |Description
+
+|`prompt`
+|Yes
+|Task instructions for the sub-agent. Must be completely self-contained -- the sub-agent has no other context.
+
+|`description`
+|Yes
+|3-5 word summary of the task. Used for logging and display.
+
+|`subagent_type`
+|No
+|Agent specialization. Controls the system prompt and available tools. Options: `general-purpose`, `Explore`, `Plan`, `code-reviewer`, and custom types.
+
+|`model`
+|No
+|Model override. Options: `sonnet`, `opus`, `haiku`. Defaults to the parent's model.
+
+|`run_in_background`
+|No
+|Boolean. When `true`, the sub-agent runs asynchronously. The parent continues working and receives a notification when the sub-agent completes.
+
+|`isolation`
+|No
+|Set to `"worktree"` for git worktree isolation. The sub-agent works in a temporary copy of the repository.
+
+|`cwd`
+|No
+|Working directory for the sub-agent. Defaults to the parent's working directory.
+
+|`name`
+|No
+|Agent identifier. Used with `SendMessage` for inter-agent communication.
+|===
+
+=== Agent Types
+
+The `subagent_type` parameter controls what the sub-agent can do.
+Each type receives a different system prompt and tool set.
+
+==== `general-purpose` (default)
+
+Full tool access.
+Can read, write, execute commands, and make changes.
+Use this when the sub-agent needs to do real work: implement features, fix bugs, refactor code.
+
+==== `Explore`
+
+Fast codebase exploration.
+Read-only access -- the agent can read files, search, and grep, but cannot write or execute.
+Optimized for understanding code structure, finding patterns, and answering questions about a codebase.
+Use this for research tasks where you need answers, not changes.
+
+==== `Plan`
+
+Architecture and design.
+No write access.
+The agent can read and analyze the codebase, but its output is a plan or recommendation, not code changes.
+Use this for design reviews, architecture proposals, or implementation planning.
+
+==== `code-reviewer`
+
+Reviews code against a plan and coding standards.
+Read-only access with a system prompt tuned for critique rather than creation.
+Use this after implementing changes to get a structured review.
+
+==== Custom types
+
+You can define custom agent types with specialized system prompts.
+This is useful when you have recurring delegation patterns that benefit from a consistent framing.
+
+=== Worktree Isolation
+
+For tasks that involve experimental changes, worktree isolation prevents the sub-agent from modifying your working tree.
+
+When `isolation` is set to `"worktree"`:
+
+1. Claude Code creates a temporary git worktree -- a separate checkout of your repository in a different directory
+2. The sub-agent works entirely within this isolated copy
+3. All file changes happen in the worktree, not in your main working directory
+4. After the agent completes, you can review the changes before deciding to merge or discard them
+5. If the agent made no changes, the worktree is automatically cleaned up
+
+[mermaid]
+....
+flowchart LR
+    M["Main Repo<br/>(your working tree)"] -->|"git worktree create"| W["Isolated Worktree<br/>(temporary copy)"]
+    W -->|"agent works here"| W
+    W -->|"review changes"| D{"Keep?"}
+    D -->|"yes"| MR["Merge to main"]
+    D -->|"no"| X["Discard worktree"]
+
+    style M fill:#e8f4f8,stroke:#2c3e50
+    style W fill:#fef9e7,stroke:#2c3e50
+    style D fill:#fadbd8,stroke:#2c3e50
+    style MR fill:#d5f5e3,stroke:#2c3e50
+    style X fill:#f5b7b1,stroke:#2c3e50
+....
+
+Worktree isolation is ideal for:
+
+* Trying out a refactoring approach before committing to it
+* Exploring alternative implementations
+* Running destructive experiments (deleting files, restructuring directories) without risk
+* Having a sub-agent prototype a change while you continue working on the main branch
+
+=== Foreground vs Background
+
+Sub-agents can run in two modes:
+
+==== Foreground (default)
+
+Blocking execution.
+The parent agent waits for the sub-agent to complete before continuing.
+The sub-agent's result is immediately available in the parent's context.
+
+Use foreground when:
+
+* You need the sub-agent's result before proceeding
+* The task is a dependency for the next step
+* You want to review the result before deciding what to do next
+
+==== Background
+
+Asynchronous execution.
+The parent agent continues working while the sub-agent runs independently.
+When the sub-agent completes, the parent receives a notification with the result.
+
+Use background when:
+
+* The task is independent of the parent's current work
+* You want to parallelize -- the parent does one thing while the sub-agent does another
+* The task is long-running and you do not want to block the parent
+
+The decision is simple: if you need the result now, use foreground.
+If the work is independent, use background.
+
+=== When to Use Agents
+
+Agents are powerful but not free.
+Each sub-agent consumes API tokens, adds latency, and introduces coordination overhead.
+Use them when the benefits outweigh the costs.
+
+==== Use agents for:
+
+* *Open-ended research.* "Explore this codebase and find all the places where we handle authentication." The search space is broad and the agent needs to reason about what to look at next.
+* *Parallel independent tasks.* Two features that do not depend on each other can be worked on simultaneously by separate agents.
+* *Specialized delegation.* A code review agent examines changes while you continue implementing.
+* *Long-running operations.* A background agent runs a comprehensive test analysis while you work on the next feature.
+
+==== Do not use agents for:
+
+* *Reading specific files.* If you know the file path, use `Read`. Do not spawn an agent to read one file.
+* *Simple searches.* If you need to find a string in the codebase, use `Grep` or `Glob`. An agent is overkill.
+* *Trivial tasks.* If the task can be done in a single tool call, an agent adds overhead without benefit.
+
+The rule of thumb: if you can specify the exact file path or the exact search query, do not spawn an agent.
+Agents are for tasks where the agent needs to *decide* what to read, search, or do.
+
+=== Effective Prompt Design for Agents
+
+Because of zero-context isolation, the prompt you give a sub-agent is the *entire* briefing.
+Writing effective agent prompts is a skill.
+
+==== Include everything the agent needs
+
+* What files to read or examine
+* What constraints to follow
+* What the codebase structure looks like (or tell the agent to explore it)
+* What the desired output format is
+
+==== Specify what NOT to do
+
+* "Do not modify any test files"
+* "Do not install new dependencies"
+* "Do not change the API contract"
+
+Constraints are as important as instructions.
+Without them, a general-purpose agent will do whatever seems reasonable -- which may not be what you want.
+
+==== Define the output format
+
+* "Return a JSON object with keys: summary, files_changed, and recommendations"
+* "Write your findings as a markdown list with file paths and line numbers"
+* "Create the files directly -- do not just describe what to create"
+
+The parent agent needs to process the sub-agent's result.
+A clear output format makes this reliable.
+
+==== Remember: the prompt IS the context
+
+If you reference "the file we just looked at" in a sub-agent prompt, the sub-agent has no idea what file you mean.
+If you say "follow the same pattern," the sub-agent does not know what pattern you mean.
+
+Every reference must be explicit.
+Every assumption must be stated.
+The prompt is a self-contained briefing, not a continuation of a conversation.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Spawn a Sub-Agent
+
+Start a Claude Code session in your learnpath project:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Ask Claude to delegate a research task:
+
+----
+Use an Explore agent to find all the API endpoint files in this project and list every route with its HTTP method
+----
+
+Watch what happens:
+
+1. Claude decides to use the Agent tool instead of doing the search itself.
+2. It constructs a prompt for the sub-agent. Pay attention to how detailed and self-contained this prompt is -- it includes the working directory, what to look for, and what format to return.
+3. The sub-agent runs its own agentic loop: reading files, searching for patterns, reasoning about what it finds.
+4. The result flows back to the parent, which presents it to you.
+
+Examine the prompt Claude constructed for the sub-agent.
+Notice that it does not reference your conversation -- it is a standalone briefing.
+
+=== Exercise 2: Context Isolation Experiment
+
+This exercise proves that zero-context isolation is real.
+
+In your Claude Code session, first read a file:
+
+----
+Read the file main.py and tell me what it contains
+----
+
+Claude reads the file and summarizes it.
+Now the parent agent has `main.py` in its context.
+
+Spawn an agent and test whether it inherits that context:
+
+----
+Spawn a sub-agent and ask it: "What was the last file I read in this conversation?"
+----
+
+The sub-agent will not know.
+It has no access to the parent's conversation history.
+It will likely respond that it has no information about previous conversation history.
+
+Now ask the sub-agent to read the same file:
+
+----
+Spawn a sub-agent and ask it to read main.py in the current directory and summarize it
+----
+
+The sub-agent *can* read the file -- it has tool access.
+But it reads it from scratch, independently, with no knowledge that the parent already read it.
+
+This is zero-context isolation in practice.
+The sub-agent can access the same filesystem, but it does not share the parent's memory of what has been read or discussed.
+
+=== Exercise 3: Worktree Isolation
+
+Ask Claude to use a worktree-isolated agent to experiment with a change:
+
+----
+Use a worktree-isolated agent to experiment with refactoring main.py to split the route handlers into separate files (one per resource). Do not merge the changes -- I want to review them first.
+----
+
+Observe:
+
+1. Claude creates a git worktree -- a temporary directory containing a separate checkout of your repository.
+2. The sub-agent works in the worktree directory, making changes freely.
+3. Your main working directory is untouched. Verify this by checking `git status` -- no changes.
+4. The agent reports what it changed. You can review the diff and decide whether to apply the changes.
+
+After reviewing, you can either merge the worktree changes or discard them entirely.
+The key point: experimentation without risk.
+
+=== Exercise 4: Background Agent
+
+Spawn a background agent while continuing to work:
+
+----
+Spawn a background agent to analyze all the error handling in this project -- find every try/except block, every HTTP error response, and every place where errors might be silently swallowed. While that runs, help me add input validation to the topics endpoint.
+----
+
+Observe:
+
+1. Claude dispatches the research task to a background agent.
+2. It immediately continues working with you on the input validation task -- the parent is not blocked.
+3. When the background agent completes, a notification appears with the results.
+4. Claude can then incorporate the findings into the ongoing conversation.
+
+This is the parallel workflow pattern: the background agent handles research while you and the parent agent handle implementation.
+
+'''
+
+== Part 3: Build With It
+
+You will build the React frontend for the `{project-name}` application using multi-agent parallelism.
+This is a realistic use of multi-agent patterns: independent workstreams that can be dispatched to separate agents and integrated by the parent.
+
+=== Step 1: Set Up the React Project
+
+Create the frontend project alongside your existing backend:
+
+[source,bash]
+----
+cd ~/learnpath
+npx create-react-app frontend --template typescript
+----
+
+Verify the setup:
+
+[source,bash]
+----
+cd ~/learnpath/frontend
+npm start
+----
+
+You should see the default React app running on `http://localhost:3000`.
+Stop it with `Ctrl+C`.
+
+=== Step 2: Multi-Agent Build
+
+Start a Claude Code session and request a multi-agent build:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Give Claude a task that naturally decomposes into parallel work:
+
+----
+Build the React frontend for the learnpath app. Use one agent to refine the API endpoints (add pagination, filtering, proper error responses) and another agent to scaffold the React components (topic list, asset list, learning path view). Both agents should work from the current project state.
+----
+
+Watch how Claude handles this:
+
+1. *Decomposition.* Claude analyzes the task and identifies two independent workstreams: backend refinement and frontend scaffolding.
+
+2. *Prompt construction.* Claude builds a self-contained prompt for each agent. The backend agent gets a briefing about the current API structure, what to improve, and what constraints to follow. The frontend agent gets a briefing about the React project, what components to create, and what API endpoints to target.
+
+3. *Dispatch.* Claude may run the agents in foreground sequentially, or in background in parallel, depending on its assessment of the dependencies. If it runs them in foreground, it waits for each result before dispatching the next. If background, both run simultaneously.
+
+4. *Integration.* When both agents complete, Claude reviews their results and handles any integration work -- ensuring the frontend components match the refined API endpoints.
+
+Pay attention to the prompts Claude constructs.
+Each prompt should be completely self-contained: it tells the agent what files to examine, what the current state is, what to build, and what format to use for the output.
+
+=== Step 3: Guide the Agents (If Needed)
+
+If Claude does not automatically use agents for this task, guide it explicitly:
+
+----
+Spawn an Explore agent to analyze the current API endpoints in main.py. It should list every route, its HTTP method, request/response schema, and any missing features (pagination, filtering, error handling). Return the analysis as a structured list.
+----
+
+After reviewing the analysis:
+
+----
+Spawn a general-purpose agent to create React components in the frontend directory. It should create: (1) a TopicList component that fetches and displays topics, (2) an AssetList component with filtering by topic, and (3) a LearningPathView component that shows a topic with its assets. Use TypeScript, functional components, and fetch for API calls. The API runs at http://localhost:8000.
+----
+
+Then spawn a second agent for the backend work:
+
+----
+Spawn a general-purpose agent to refine the API endpoints in main.py. Based on the analysis, add: (1) pagination with skip/limit query parameters, (2) filtering by topic for the assets endpoint, (3) proper HTTP error responses with consistent error body format. Do not change the existing data models.
+----
+
+This manual approach gives you finer control over what each agent does and lets you see the agent prompts more clearly.
+
+=== Step 4: Transcript Review
+
+After the multi-agent session, review the transcripts.
+This is where the learning happens.
+
+Using `claude-code-transcripts` or the raw session data in `~/.claude/projects/`, examine:
+
+==== Parent agent transcript
+
+* How Claude decomposed the task
+* The prompts it constructed for each sub-agent
+* How it processed and integrated the results
+* What tool calls the parent made directly vs. delegated
+
+==== Sub-agent transcripts
+
+* What context each sub-agent received (only the prompt -- nothing else)
+* What tools each sub-agent used
+* How each sub-agent reasoned about its task
+* The result format returned to the parent
+
+==== Comparison
+
+[cols="1,3,3",options="header"]
+|===
+|Aspect |Parent Agent |Sub-Agent
+
+|Context
+|Full conversation history with the user, all prior tool results, accumulated knowledge
+|Only the prompt it received -- zero inherited context
+
+|Tool access
+|All tools available (Read, Edit, Bash, Agent, MCP, etc.)
+|Determined by `subagent_type` -- may be read-only or restricted
+
+|Autonomy
+|Decides how to decompose work and what to delegate
+|Executes the specific task it was given
+
+|Persistence
+|Conversation continues after sub-agent completes
+|Terminates after completing its task, context is discarded
+
+|Output
+|Presents results to the user, decides next steps
+|Returns structured result to the parent
+|===
+
+Trace the flow: user request -> parent reasoning -> agent dispatch -> sub-agent execution -> result return -> parent integration -> user response.
+This is the multi-agent orchestration pattern.
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* React frontend scaffolded in `~/learnpath/frontend` with TypeScript components for topics, assets, and learning paths
+* API endpoints refined with pagination, filtering, and proper error responses
+* Experience using foreground agents, background agents, and worktree isolation
+* Transcript evidence showing multi-agent orchestration: parent prompts, sub-agent execution, result integration
+
+*Understanding check:* You should be able to:
+
+1. Explain zero-context isolation and why it matters for prompt design
+2. Choose the right agent type for a given task (Explore for research, general-purpose for implementation, Plan for architecture)
+3. Decide when to use foreground vs. background execution
+4. Write a self-contained prompt for a sub-agent that includes all necessary context
+5. Explain when agents add value vs. when simpler tools (Read, Grep) are sufficient
+6. Describe how worktree isolation protects your working directory during experimental changes
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-docs-url}/guides/multi-agent[Multi-Agent Guide]
+* {claude-code-docs-url}/reference/tools/agent[Agent & Tasks Reference]
+
+'''
+
+Next: xref:10-sdk-integration.adoc[Module 10: SDK & Integration]

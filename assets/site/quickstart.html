@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quickstart - Claude Code Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="index.html">Introduction</a>
+  <a href="quickstart.html" class="active">Quickstart</a>
+  <a href="installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="concepts/how-it-works.html">How It Works</a>
+  <a href="concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="concepts/permissions.html">Permissions</a>
+  <a href="concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="configuration/claudemd.html">CLAUDE.md</a>
+  <a href="configuration/environment-variables.html">Environment Variables</a>
+  <a href="configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="guides/authentication.html">Authentication</a>
+  <a href="guides/hooks.html">Hooks</a>
+  <a href="guides/mcp-servers.html">MCP Servers</a>
+  <a href="guides/multi-agent.html">Multi-Agent</a>
+  <a href="guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="reference/commands/overview.html">Overview</a>
+  <a href="reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="reference/tools/bash.html">Bash</a>
+  <a href="reference/tools/file-operations.html">File Operations</a>
+  <a href="reference/tools/search.html">Search</a>
+  <a href="reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="reference/sdk/overview.html">Overview</a>
+  <a href="reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Getting Started / Quickstart</div>
+  </div>
+  <div class="content">
+
+<h1>Quickstart</h1>
+<p class="page-desc">Get up and running with Claude Code in minutes.</p>
+
+<h2>Prerequisites</h2>
+<p>Requires Node.js 18+ and npm. Check your version:</p>
+<pre><code>node --version</code></pre>
+<p>If not installed, download from <a href="https://nodejs.org">nodejs.org</a>.</p>
+
+<h2>Installation</h2>
+<p>Install globally:</p>
+<pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
+<p>Verify:</p>
+<pre><code>claude --version</code></pre>
+
+<h2>Authentication</h2>
+<p>Run <code>claude</code> to start setup with OAuth browser sign-in. Alternatively:</p>
+<pre><code>export ANTHROPIC_API_KEY=sk-ant-...</code></pre>
+<blockquote>API keys take priority when the ANTHROPIC_API_KEY environment variable is set.</blockquote>
+
+<h2>Project Navigation</h2>
+<pre><code>cd my-project</code></pre>
+
+<h2>Interactive Session</h2>
+<p>Execute <code>claude</code> to begin work. The system accepts natural language tasks and shows plans before making permission-requiring changes. Example tasks include:</p>
+<ul>
+  <li>Explaining codebases</li>
+  <li>Adding validation</li>
+  <li>Writing tests</li>
+  <li>Finding error handling issues</li>
+</ul>
+
+<h2>CLAUDE.md Initialization</h2>
+<p>Run <code>/init</code> within a session to generate project-specific configuration. The file captures build commands, testing requirements, and team conventions, loading automatically each session.</p>
+
+<h2>Non-Interactive Mode</h2>
+<p>Use the <code>-p</code> flag for single commands:</p>
+<pre><code>claude -p "explain this codebase"</code></pre>
+
+<h2>Key Slash Commands</h2>
+<table>
+  <thead><tr><th>Command</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>/help</code></td><td>Display commands and shortcuts</td></tr>
+    <tr><td><code>/init</code></td><td>Generate CLAUDE.md</td></tr>
+    <tr><td><code>/memory</code></td><td>View memory files</td></tr>
+    <tr><td><code>/permissions</code></td><td>Adjust autonomy settings</td></tr>
+    <tr><td><code>/mcp</code></td><td>Manage MCP servers</td></tr>
+    <tr><td><code>/clear</code></td><td>Reset context</td></tr>
+    <tr><td><code>/exit</code></td><td>End session</td></tr>
+  </tbody>
+</table>
+
+<div class="page-nav">
+  <a href="index.html" class="prev"><span class="label">Previous</span><span class="title">Introduction</span></a>
+  <a href="installation.html" class="next"><span class="label">Next</span><span class="title">Installation</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

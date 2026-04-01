@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Environment Variables - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../concepts/how-it-works.html">How It Works</a>
+  <a href="../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../concepts/permissions.html">Permissions</a>
+  <a href="../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="claudemd.html">CLAUDE.md</a>
+  <a href="environment-variables.html" class="active">Environment Variables</a>
+  <a href="settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../guides/authentication.html">Authentication</a>
+  <a href="../guides/hooks.html">Hooks</a>
+  <a href="../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Configuration / Environment Variables</div>
+  </div>
+  <div class="content">
+
+<h1>Environment Variables</h1>
+<p class="page-desc">Full environment variables reference for Claude Code.</p>
+
+<h2>Authentication</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Direct API key authentication</td></tr>
+    <tr><td><code>ANTHROPIC_AUTH_TOKEN</code></td><td>OAuth token (highest priority)</td></tr>
+    <tr><td><code>ANTHROPIC_BASE_URL</code></td><td>Custom API base URL</td></tr>
+    <tr><td><code>CLAUDE_CODE_API_BASE_URL</code></td><td>Alternative API base URL</td></tr>
+    <tr><td><code>ANTHROPIC_BEDROCK_BASE_URL</code></td><td>AWS Bedrock endpoint</td></tr>
+    <tr><td><code>ANTHROPIC_VERTEX_PROJECT_ID</code></td><td>GCP Vertex project</td></tr>
+    <tr><td><code>CLAUDE_CODE_USE_BEDROCK</code></td><td>Enable AWS Bedrock</td></tr>
+    <tr><td><code>CLAUDE_CODE_USE_FOUNDRY</code></td><td>Enable Foundry</td></tr>
+    <tr><td><code>CLAUDE_CODE_OAUTH_TOKEN</code></td><td>OAuth token override</td></tr>
+  </tbody>
+</table>
+
+<h2>Config Paths</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>CLAUDE_CONFIG_DIR</code></td><td>Config directory (default <code>~/.claude</code>)</td></tr>
+    <tr><td><code>CLAUDE_CODE_MANAGED_SETTINGS_PATH</code></td><td>Managed settings file path</td></tr>
+  </tbody>
+</table>
+
+<h2>Model Selection</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>ANTHROPIC_MODEL</code></td><td>Primary model override</td></tr>
+    <tr><td><code>CLAUDE_CODE_SUBAGENT_MODEL</code></td><td>Sub-agent model</td></tr>
+    <tr><td><code>CLAUDE_CODE_AUTO_MODE_MODEL</code></td><td>Auto mode model</td></tr>
+  </tbody>
+</table>
+
+<h2>Behavior Toggles</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>CLAUDE_CODE_REMOTE</code></td><td>Remote mode</td></tr>
+    <tr><td><code>CLAUDE_CODE_SIMPLE</code></td><td>Simplified tool set</td></tr>
+    <tr><td><code>DISABLE_AUTO_COMPACT</code></td><td>Disable auto-compaction</td></tr>
+    <tr><td><code>CLAUDE_CODE_DISABLE_BACKGROUND_TASKS</code></td><td>Disable background tasks</td></tr>
+    <tr><td><code>CLAUDE_CODE_DISABLE_THINKING</code></td><td>Disable thinking</td></tr>
+    <tr><td><code>CLAUDE_CODE_DISABLE_AUTO_MEMORY</code></td><td>Disable auto memory</td></tr>
+    <tr><td><code>CLAUDE_CODE_DISABLE_CLAUDE_MDS</code></td><td>Disable CLAUDE.md loading</td></tr>
+    <tr><td><code>CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC</code></td><td>Disable non-essential traffic</td></tr>
+    <tr><td><code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD</code></td><td>Additional CLAUDE.md dirs</td></tr>
+    <tr><td><code>CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR</code></td><td>Maintain project CWD in bash</td></tr>
+  </tbody>
+</table>
+
+<h2>Resource Limits</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>CLAUDE_CODE_MAX_OUTPUT_TOKENS</code></td><td>Max output tokens</td></tr>
+    <tr><td><code>CLAUDE_CODE_MAX_CONTEXT_TOKENS</code></td><td>Max context tokens</td></tr>
+    <tr><td><code>BASH_MAX_OUTPUT_LENGTH</code></td><td>Max bash output length</td></tr>
+    <tr><td><code>API_TIMEOUT_MS</code></td><td>API timeout in milliseconds</td></tr>
+  </tbody>
+</table>
+
+<h2>Telemetry</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>CLAUDE_CODE_ENABLE_TELEMETRY</code></td><td>Enable telemetry</td></tr>
+    <tr><td><code>CLAUDE_CODE_JSONL_TRANSCRIPT</code></td><td>JSONL transcript output</td></tr>
+  </tbody>
+</table>
+
+<h2>Vertex Region Overrides</h2>
+<table>
+  <thead><tr><th>Model Prefix</th><th>Environment Variable</th></tr></thead>
+  <tbody>
+    <tr><td>claude-haiku-4-5</td><td><code>VERTEX_REGION_CLAUDE_HAIKU_4_5</code></td></tr>
+    <tr><td>claude-3-5-haiku</td><td><code>VERTEX_REGION_CLAUDE_3_5_HAIKU</code></td></tr>
+    <tr><td>claude-3-5-sonnet</td><td><code>VERTEX_REGION_CLAUDE_3_5_SONNET</code></td></tr>
+    <tr><td>claude-3-7-sonnet</td><td><code>VERTEX_REGION_CLAUDE_3_7_SONNET</code></td></tr>
+    <tr><td>claude-opus-4-1</td><td><code>VERTEX_REGION_CLAUDE_4_1_OPUS</code></td></tr>
+    <tr><td>claude-opus-4</td><td><code>VERTEX_REGION_CLAUDE_4_0_OPUS</code></td></tr>
+    <tr><td>claude-sonnet-4-6</td><td><code>VERTEX_REGION_CLAUDE_4_6_SONNET</code></td></tr>
+    <tr><td>claude-sonnet-4-5</td><td><code>VERTEX_REGION_CLAUDE_4_5_SONNET</code></td></tr>
+    <tr><td>claude-sonnet-4</td><td><code>VERTEX_REGION_CLAUDE_4_0_SONNET</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Environment in settings.json</h2>
+<pre><code>{
+  "env": {
+    "DISABLE_AUTO_COMPACT": "1",
+    "BASH_MAX_OUTPUT_LENGTH": "30000"
+  }
+}</code></pre>
+
+<div class="page-nav">
+  <a href="claudemd.html" class="prev"><span class="label">Previous</span><span class="title">CLAUDE.md</span></a>
+  <a href="settings.html" class="next"><span class="label">Next</span><span class="title">Settings</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

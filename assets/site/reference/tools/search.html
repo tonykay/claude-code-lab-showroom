@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search - Claude Code Documentation</title>
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../../index.html">Introduction</a>
+  <a href="../../quickstart.html">Quickstart</a>
+  <a href="../../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../../concepts/how-it-works.html">How It Works</a>
+  <a href="../../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../../concepts/permissions.html">Permissions</a>
+  <a href="../../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="../../guides/authentication.html">Authentication</a>
+  <a href="../../guides/hooks.html">Hooks</a>
+  <a href="../../guides/mcp-servers.html">MCP Servers</a>
+  <a href="../../guides/multi-agent.html">Multi-Agent</a>
+  <a href="../../guides/skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../commands/overview.html">Overview</a>
+  <a href="../commands/cli-flags.html">CLI Flags</a>
+  <a href="../commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="agent.html">Agent &amp; Tasks</a>
+  <a href="bash.html">Bash</a>
+  <a href="file-operations.html">File Operations</a>
+  <a href="search.html" class="active">Search</a>
+  <a href="web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../sdk/overview.html">Overview</a>
+  <a href="../sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Reference / Tools / Search</div>
+  </div>
+  <div class="content">
+
+<h1>Search</h1>
+<p class="page-desc">File pattern matching and content search tools.</p>
+
+<h2>Glob</h2>
+<p>Fast file pattern matching sorted by modification time, capped at 100 files.</p>
+<ul>
+  <li>Supports patterns like <code>**/*.js</code> or <code>src/**/*.ts</code></li>
+  <li>Always auto-approved</li>
+  <li>Excludes VCS directories</li>
+</ul>
+
+<h2>Grep</h2>
+<p>ripgrep-based content search with three output modes:</p>
+<table>
+  <thead><tr><th>Mode</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td><code>files_with_matches</code></td><td>File paths only (default)</td></tr>
+    <tr><td><code>content</code></td><td>Matching lines with context</td></tr>
+    <tr><td><code>count</code></td><td>Match counts per file</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>Multiline with <code>multiline: true</code></li>
+  <li>Literal braces need escaping</li>
+  <li>Always auto-approved</li>
+</ul>
+
+<p>Both tools exclude <code>.git</code>, <code>.svn</code>, <code>.hg</code>, <code>.bzr</code>, <code>.jj</code>, <code>.sl</code> directories.</p>
+
+<div class="page-nav">
+  <a href="file-operations.html" class="prev"><span class="label">Previous</span><span class="title">File Operations</span></a>
+  <a href="web.html" class="next"><span class="label">Next</span><span class="title">Web</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>

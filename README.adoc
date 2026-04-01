@@ -1,0 +1,64 @@
+= Claude Code Deep Dive: Zero to Hero
+
+An architecture-driven, self-paced course that teaches experienced developers how Claude Code works under the hood -- and how to use that understanding to work with it effectively.
+
+== What This Course Covers
+
+10 modules + capstone, each pairing architectural deep dives with hands-on exercises and a progressive build project:
+
+[cols="1,3,3",options="header"]
+|===
+|Module |Architecture Concept |Build Milestone
+
+|1. The Agentic Loop |Six-step cycle: input, context, reasoning, permissions, tools, loop |Scaffold project with uv + FastAPI
+|2. Context & Memory |4-level CLAUDE.md hierarchy, @includes, granular rules |Configure project memory and settings
+|3. Tools & Tool Dispatch |Built-in tools, checkPermissions, tool selection |Postgres schema, Pydantic V2 models, CRUD API
+|4. Permissions & Trust |6 permission modes, rules, bash patterns |Project permission rules
+|5. Hooks & Lifecycle |6 events, 4 hook types, exit codes |Auto-format, test, lint hooks
+|6. Skills & Workflows |SKILL.md, namespacing, arguments, paths |Custom project skills
+|7. Extending Claude Code |Superpowers, marketplaces, ecosystem |Asset tagging via guided workflow
+|8. MCP Servers |Protocol, transports, config, safety |Custom FastMCP server for RSS ingestion
+|9. Multi-Agent Patterns |Sub-agents, isolation, worktrees |React frontend via parallel agents
+|10. SDK & Integration |Subprocess model, messages, sessions |CI automation script
+|Capstone |Full architecture review |Complete learning asset manager
+|===
+
+== What You Will Build
+
+Across the course you build a *Personal Learning Path Manager* -- a full-stack application for curating learning resources by topic.
+
+* *Python 3.13* with *uv*, *FastAPI*, *Pydantic V2*
+* *PostgreSQL* for persistence
+* *React* frontend
+* Custom *MCP server*, *hooks*, *skills*, and *CI automation*
+
+== Prerequisites
+
+* Claude Code installed (https://code.claude.com/docs[install guide])
+* Python 3.13+, uv, Node.js 20+, PostgreSQL
+* Casual experience with Claude Code (you've used it, but want to understand it)
+
+See the full xref:content/modules/ROOT/pages/00-prerequisites.adoc[prerequisites page] in the course.
+
+== Local Preview
+
+[source,sh]
+----
+podman run --rm --name antora -v $PWD:/antora -p 8080:8080 -i -t ghcr.io/juliaaano/antora-viewer
+----
+
+On SELinux systems, append `:z` to the volume mount.
+
+== Source Material
+
+This course draws from:
+
+* https://code.claude.com/docs[Claude Code Official Documentation]
+* An architectural reference site (included in `assets/site/`)
+* https://github.com/simonw/claude-code-transcripts[claude-code-transcripts] -- session replay for introspection exercises
+* https://github.com/luongnv89/claude-howto[claude-howto] and https://github.com/ykdojo/claude-code-tips[claude-code-tips] -- community resources
+
+== Built With
+
+* https://antora.org[Antora] static site generator
+* https://github.com/rhpds/showroom_template_nookbag[Showroom template] for lab/workshop delivery

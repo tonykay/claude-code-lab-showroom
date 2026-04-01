@@ -1,0 +1,658 @@
+= Module 4: Permissions & Trust
+:navtitle: Permissions & Trust
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-3 complete -- you understand the agentic loop, context assembly, memory hierarchy, and tool dispatch
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, and CRUD API endpoints
+* `CLAUDE.md` and `.claude/settings.json` configured from Module 2
+====
+
+'''
+
+== Part 1: How It Works
+
+In Module 3 you saw the permission check at Step 4 of the agentic loop -- every tool call passes through `checkPermissions()` before execution.
+That check was a black box.
+This module opens it.
+
+The permission system is the mechanism that keeps you in control of what Claude Code can do.
+It determines whether a tool call executes automatically, prompts you for approval, or is blocked outright.
+Understanding it deeply is essential because misconfigured permissions either slow you down with unnecessary prompts or expose you to unintended side effects.
+
+=== The Six Permission Modes
+
+Claude Code supports six permission modes.
+Each mode defines a baseline policy for how tool calls are handled.
+
+[cols="1,2,2,2,2",options="header"]
+|===
+|Mode |File Ops |Bash |MCP Tools |Best For
+
+|`default`
+|Read auto-approved; Write/Edit prompt
+|Prompts for every command
+|Prompts for every call
+|Day-to-day interactive development -- you see and approve each side effect
+
+|`acceptEdits`
+|Read auto-approved; Write/Edit auto-approved
+|Prompts for every command
+|Prompts for every call
+|Focused coding sessions where you trust the edits but want to review shell commands
+
+|`plan`
+|Read auto-approved; Write/Edit blocked
+|All commands blocked
+|All calls blocked
+|Exploring an unfamiliar codebase -- Claude can analyze but cannot change anything
+
+|`bypassPermissions`
+|All auto-approved
+|All auto-approved
+|All auto-approved
+|Sandboxed CI/CD environments only -- never use this interactively
+
+|`dontAsk`
+|All auto-approved
+|All auto-approved
+|All auto-approved
+|Scripted automation via the SDK where no human is present to approve prompts
+
+|`auto`
+|Classifier decides per call
+|Classifier decides per call
+|Classifier decides per call
+|Experimental -- an ML classifier evaluates risk per tool call (feature flag required)
+|===
+
+[WARNING]
+====
+`bypassPermissions` and `dontAsk` disable all safety prompts.
+Use them only in environments where Claude Code runs inside a sandbox (Docker container, CI runner, disposable VM) with no access to sensitive resources.
+Never use them in interactive terminal sessions on your development machine.
+====
+
+The mode sets the *default* behavior.
+Permission rules (covered next) can override it -- allowing specific operations that the mode would normally prompt for, or denying operations that the mode would normally allow.
+
+=== The Permission Rules System
+
+Permission rules are allow/deny lists that override the mode.
+They are evaluated *before* the mode is consulted, which means rules always take precedence.
+
+Each rule has three components:
+
+* *Tool name* -- which tool the rule applies to (e.g., `Bash`, `Edit`, `Write`, `mcp__servername__toolname`)
+* *Pattern* (optional) -- a glob pattern that narrows the match (e.g., `uv run *` for Bash commands, an absolute path for file operations)
+* *Behavior* -- `allow` or `deny`
+
+Rules are stored in JSON format in `settings.json` files:
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pytest *)",
+      "Bash(psql *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)"
+    ]
+  }
+}
+----
+
+The format is `ToolName(pattern)`.
+For tools without patterns, use the tool name alone: `Edit` or `Write`.
+
+[IMPORTANT]
+====
+Deny rules always supersede allow rules.
+If a command matches both an allow rule and a deny rule, it is denied.
+There is no way to override a deny rule with an allow rule -- this is a deliberate safety constraint.
+====
+
+=== Five Configuration Sources
+
+Permission rules can come from five different sources, listed here in priority order from highest to lowest:
+
+[cols="1,2,2",options="header"]
+|===
+|Priority |Source |Location
+
+|1 (highest)
+|CLI arguments
+|`--permission-mode`, `--allowedTools`, `--disallowedTools` flags passed at launch
+
+|2
+|Session
+|Set via the `/permissions` slash command during a session (not persisted)
+
+|3
+|Local (user-specific, not committed)
+|`.claude/settings.local.json` in the project directory
+
+|4
+|Project (committed, shared with team)
+|`.claude/settings.json` in the project directory
+
+|5 (lowest)
+|User (global)
+|`~/.claude/settings.json` in your home directory
+|===
+
+Higher-priority sources override lower ones.
+This means CLI flags beat everything, session overrides beat file-based rules, and local settings beat project settings.
+
+The separation between project settings (`.claude/settings.json`, committed to git) and local settings (`.claude/settings.local.json`, not committed) is important.
+Project settings define the team baseline -- every developer on the project gets the same rules.
+Local settings let individual developers customize without affecting others.
+
+=== Bash-Specific Pattern Matching
+
+Bash commands get special treatment in the permission system because shell commands are the most powerful (and most dangerous) tool Claude Code has.
+
+*Wildcards.*
+Patterns use glob-style matching.
+`uv run *` matches `uv run pytest`, `uv run ruff check src/`, and `uv run python -m myapp`.
+`docker *` matches any Docker command.
+
+*Compound commands are checked independently.*
+When Claude Code runs `uv run pytest && rm -rf /tmp/cache`, the permission system splits this into two checks:
+
+1. `uv run pytest` -- checked against rules
+2. `rm -rf /tmp/cache` -- checked against rules independently
+
+The *most restrictive result applies*.
+If the first part is allowed but the second is denied, the entire compound command is blocked.
+This prevents a pattern like: "allowed-command && malicious-command".
+
+*Examples of common rules:*
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pytest *)",
+      "Bash(docker compose *)",
+      "Bash(alembic *)",
+      "Bash(curl *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(chmod 777 *)",
+      "Bash(> /dev/*)"
+    ]
+  }
+}
+----
+
+=== Permission Evaluation Flow
+
+When a tool call arrives, the permission system evaluates it through a pipeline.
+Understanding this pipeline is the key to predicting whether a given action will execute, prompt, or block.
+
+[mermaid]
+....
+flowchart TD
+    A["Tool call arrives"] --> B{"Check deny rules"}
+    B -->|match| C["BLOCK -- deny always wins"]
+    B -->|no match| D{"Check ask rules"}
+    D -->|match| E["PROMPT -- force user approval"]
+    D -->|no match| F{"Tool-level checks"}
+    F -->|protected dir: .git, .claude| E
+    F -->|pass| G{"Safety checks"}
+    G -->|flagged| E
+    G -->|pass| H{"Check allow rules"}
+    H -->|match| I["AUTO-APPROVE"]
+    H -->|no match| J{"Apply mode"}
+    J -->|auto-approve per mode| I
+    J -->|prompt per mode| E
+    J -->|block per mode| C
+
+    style A fill:#d4e6f1,stroke:#2980b9
+    style C fill:#fadbd8,stroke:#e74c3c
+    style E fill:#f9e79f,stroke:#f39c12
+    style I fill:#d5f5e3,stroke:#27ae60
+....
+
+The critical takeaways:
+
+1. *Deny rules are checked first.* A deny match ends evaluation immediately -- the action is blocked.
+2. *Allow rules are checked after safety checks.* Even with an allow rule, protected directories (`.git/`, `.claude/`, `.vscode/`) still trigger prompts.
+3. *The mode is the fallback.* It only applies when no rule matches and no safety check triggers.
+
+This means you can think of rules as *exceptions* to the mode.
+The mode sets the baseline, and rules carve out specific overrides.
+
+=== Protected Directories
+
+Regardless of mode or rules, certain directories always trigger a permission prompt:
+
+* `.git/` -- prevents accidental corruption of git internals
+* `.claude/` -- prevents modification of Claude Code's own configuration during a session
+* `.vscode/` -- prevents interference with editor settings
+
+Even `bypassPermissions` mode respects these protections.
+This is a hardcoded safety boundary that cannot be overridden.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Mode Switching
+
+Experience how different modes change Claude Code's behavior with the same request.
+
+*Start in `plan` mode:*
+
+[source,bash]
+----
+cd ~/learnpath
+claude --permission-mode plan
+----
+
+Once inside the session, ask Claude to make a change:
+
+----
+Add a comment to the top of src/learnpath/main.py saying "# Permissions test"
+----
+
+Observe what happens.
+Claude Code can Read the file (read-only operations are allowed in plan mode), but when it attempts to use Edit or Write, the operation is *blocked* -- not prompted, blocked outright.
+You will see a message indicating the tool call was denied.
+
+Exit the session and restart in `acceptEdits` mode:
+
+[source,bash]
+----
+claude --permission-mode acceptEdits
+----
+
+Give the same prompt.
+This time, the file edit executes *automatically* -- no prompt, no approval needed.
+But if Claude Code decides to run a Bash command (e.g., to verify the change with `cat`), you will be prompted.
+
+Exit and restart in `default` mode:
+
+[source,bash]
+----
+claude
+----
+
+Same prompt again.
+Now the file edit triggers a *permission prompt* -- Claude Code shows you the proposed change and asks for approval before executing.
+
+[TIP]
+====
+Clean up the test comment after this exercise:
+
+[source,bash]
+----
+claude "Remove the '# Permissions test' comment from src/learnpath/main.py"
+----
+====
+
+=== Exercise 2: Permission Rules
+
+Configure allow and deny rules, then test them.
+
+Edit `.claude/settings.json` in your project:
+
+[source,bash]
+----
+cd ~/learnpath
+cat .claude/settings.json
+----
+
+Update it to include permission rules (merge with any existing content):
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(psql *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)"
+    ]
+  }
+}
+----
+
+Start a Claude Code session and test:
+
+----
+Run: psql --version
+----
+
+The `psql --version` command should execute *without prompting* because it matches the `Bash(psql *)` allow rule.
+
+Now test the deny rule:
+
+----
+Run: rm -rf /tmp/test-dir
+----
+
+This should be *blocked* -- not prompted, blocked outright.
+Claude Code will report that the command was denied by a permission rule.
+
+Now test a command that matches neither rule:
+
+----
+Run: ls -la
+----
+
+This falls through to the mode.
+In `default` mode, `ls -la` is a Bash command, so it will *prompt* for approval.
+
+This exercise demonstrates the evaluation pipeline: deny rules first, then allow rules, then mode fallback.
+
+=== Exercise 3: Bash Pattern Matching
+
+Test how patterns interact with compound commands.
+
+Update `.claude/settings.json`:
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pytest *)"
+    ],
+    "deny": [
+      "Bash(pip install *)"
+    ]
+  }
+}
+----
+
+Start a session and test individual commands:
+
+----
+Run: uv run pytest --version
+----
+
+Auto-approved -- matches `Bash(uv run *)`.
+
+----
+Run: pytest --version
+----
+
+Auto-approved -- matches `Bash(pytest *)`.
+
+----
+Run: pip install requests
+----
+
+Blocked -- matches `Bash(pip install *)` deny rule.
+
+Now test a compound command:
+
+----
+Run: uv run pytest && pip install something
+----
+
+Observe the result.
+`uv run pytest` matches an allow rule, but `pip install something` matches a deny rule.
+Because compound commands are checked independently and the most restrictive result applies, the *entire compound command is blocked*.
+
+This is the security mechanism described in Module 3.
+It prevents a scenario where a malicious `CLAUDE.md` or prompt injection chains an allowed command with a harmful one.
+
+=== Exercise 4: The /permissions Command
+
+Use the `/permissions` slash command to inspect and modify the permission state during a session.
+
+Start a Claude Code session:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Type the slash command:
+
+----
+/permissions
+----
+
+This displays the current permission mode and all active rules from every configuration source.
+You can see which rules come from project settings, which from user settings, and which from the session.
+
+Change the mode during the session:
+
+----
+/permissions mode acceptEdits
+----
+
+Now file edits will auto-approve for the rest of this session.
+When you exit and restart, the mode reverts to the default (or whatever is configured in your settings).
+
+[NOTE]
+====
+Session-level permission changes (via `/permissions`) are not persisted.
+They apply only to the current session.
+This is useful for temporarily relaxing or tightening permissions without modifying configuration files.
+====
+
+'''
+
+== Part 3: Build With It
+
+Configure a complete permission ruleset for the `{project-name}` project that balances productivity (no unnecessary prompts for routine operations) with safety (dangerous commands are blocked).
+
+=== Step 1: Define the Permission Rules
+
+Create the following `.claude/settings.json` in your `{project-name}` project:
+
+[source,bash]
+----
+cd ~/learnpath
+----
+
+[source,json]
+----
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pytest *)",
+      "Bash(psql *)",
+      "Bash(docker *)",
+      "Bash(podman *)",
+      "Bash(alembic *)",
+      "Bash(curl http://localhost*)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(DROP TABLE *)",
+      "Bash(DROP DATABASE *)",
+      "Bash(TRUNCATE *)",
+      "Bash(DELETE FROM * WHERE 1=1*)",
+      "Bash(chmod 777 *)",
+      "Bash(> /dev/*)"
+    ]
+  }
+}
+----
+
+Save this file.
+Let's walk through the design decisions:
+
+*Allow rules* are for commands you run constantly during development.
+Every time Claude Code runs `uv run pytest`, you do not want to be prompted.
+Same for database queries (`psql`), container management (`docker`, `podman`), and migration tooling (`alembic`).
+Read-only git commands and local curl requests are safe to auto-approve.
+
+*Deny rules* are for commands that are destructive or irreversible.
+`rm -rf` deletes files without confirmation.
+`git push --force` rewrites remote history.
+The SQL patterns block destructive database operations that could wipe data.
+`chmod 777` creates security vulnerabilities.
+
+=== Step 2: Test Allowed Operations
+
+Start a Claude Code session and verify that allowed commands run without prompts:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Test each allowed category:
+
+----
+Run uv run pytest -v
+----
+
+Should auto-approve and run immediately.
+
+----
+Run git status
+----
+
+Should auto-approve.
+
+----
+Run curl http://localhost:8000/health
+----
+
+Should auto-approve (if your server is running).
+
+Confirm that you were never prompted for any of these commands.
+They all matched allow rules and bypassed the permission prompt.
+
+=== Step 3: Test Denied Operations
+
+In the same session, test the deny rules:
+
+----
+Run rm -rf /tmp/test-permissions
+----
+
+Should be blocked outright.
+
+----
+Run git push --force origin main
+----
+
+Should be blocked.
+
+Notice the difference between "blocked" and "prompted."
+Denied commands do not give you the option to approve them.
+They are rejected by the permission system before you see them.
+
+=== Step 4: Test the Fallback to Mode
+
+Test a command that matches no rule:
+
+----
+Run: whoami
+----
+
+This command is not in the allow list or the deny list.
+It falls through to the mode.
+In `default` mode, Bash commands prompt for approval.
+You should see a permission prompt asking whether to allow `whoami`.
+
+This demonstrates the three-tier evaluation:
+
+1. Deny rules -- if matched, block
+2. Allow rules -- if matched, auto-approve
+3. Mode fallback -- prompt (in default mode)
+
+=== Step 5: Transcript Review
+
+After your testing session, review the transcript to see permission evaluation in action.
+
+[source,bash]
+----
+claude-transcripts list --limit 1
+claude-transcripts view <session-id>
+----
+
+In the transcript, look for:
+
+* *Auto-approved calls* -- these matched an allow rule or were read-only tools (Read, Glob, Grep). No permission prompt appears in the transcript; the tool call is immediately followed by its result.
+* *Prompted calls* -- these fell through to the mode. The transcript shows the permission prompt and your response (approve or reject).
+* *Blocked calls* -- these matched a deny rule. The transcript shows the tool call followed by a denial message, with no prompt.
+
+Create a classification table from your transcript:
+
+[cols="2,1,2",options="header"]
+|===
+|Command |Outcome |Why
+
+|`uv run pytest -v`
+|Auto-approved
+|Matches `Bash(uv run *)` allow rule
+
+|`git status`
+|Auto-approved
+|Matches `Bash(git status*)` allow rule
+
+|`rm -rf /tmp/test-permissions`
+|Blocked
+|Matches `Bash(rm -rf *)` deny rule
+
+|`whoami`
+|Prompted
+|No rule match, falls through to `default` mode
+
+|Read main.py
+|Auto-approved
+|Read tool is always auto-approved regardless of mode
+|===
+
+This table should reinforce the evaluation pipeline: rules override mode, deny beats allow, and the mode is just the fallback.
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* `.claude/settings.json` with permission rules: allow list for routine development commands, deny list for destructive operations
+* Tested and confirmed that allowed operations run without prompts
+* Tested and confirmed that denied operations are blocked (not just prompted)
+* Tested and confirmed that unlisted commands fall through to the mode
+
+*Understanding check:* You should be able to:
+
+1. Explain the evaluation order: deny rules, ask rules, tool checks, safety checks, allow rules, mode
+2. State the five configuration sources and their priority (CLI > session > local > project > user)
+3. Explain why compound commands are checked per-segment and why the most restrictive result applies
+4. Describe what protected directories are and why they cannot be overridden
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session introspection CLI
+* Local architecture reference: `assets/site/concepts/permissions.html` and `assets/site/reference/sdk/permissions-api.html` in this course repository
+
+'''
+
+Next: xref:05-hooks-lifecycle.adoc[Module 5: Hooks & Lifecycle]

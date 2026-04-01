@@ -1,0 +1,126 @@
+= Claude Code Deep Dive: Zero to Hero
+:navtitle: Course Overview
+:source-highlighter: rouge
+:icons: font
+
+== What This Course Is
+
+This is not a getting-started tutorial.
+If you have already used Claude Code to scaffold a project, fix a bug, or generate some boilerplate, you are past the starting line.
+This course takes you behind the curtain -- into the architecture, protocols, and design decisions that make Claude Code work the way it does.
+
+You will learn the six-step agentic loop that drives every Claude Code session, how context is assembled from a four-level memory hierarchy, how tools are dispatched and permissions are enforced, how hooks let you inject custom logic at lifecycle boundaries, and how MCP servers, multi-agent orchestration, and the SDK extend Claude Code into a programmable platform.
+Each concept is grounded in real internals -- not abstractions.
+
+The target audience is experienced developers who have used Claude Code casually but want to understand _why_ it behaves the way it does, _how_ to control that behavior precisely, and _what_ becomes possible once you understand the machinery underneath.
+
+== What You Will Build
+
+Across all ten modules and the capstone, you will build a *Personal Learning Path Manager* -- a full-stack application for curating, tagging, and organizing learning assets (articles, videos, repos, courses) into structured learning paths.
+
+The tech stack:
+
+* *Python {python-version}* with *uv* for dependency management
+* *FastAPI* for the REST API
+* *Pydantic V2* for data validation and structured outputs
+* *PostgreSQL* for persistence
+* *React* for the frontend
+
+Each module adds a meaningful layer to this project.
+Module 1 scaffolds the project.
+Module 3 builds the database schema and CRUD API.
+Module 8 adds an MCP server for RSS feed ingestion.
+Module 9 builds the React frontend with parallel agents.
+By the time you reach the capstone, you have a fully functional application -- and a deep architectural understanding of the tool that helped you build it.
+
+== How Each Module Works
+
+Every module follows the same three-part rhythm:
+
+*How It Works*::
+An architecture deep dive into the relevant Claude Code subsystem.
+Expect mermaid diagrams, internal data flows, and design rationale.
+You will understand the mechanism before you use it.
+
+*See It In Action*::
+Introspection exercises that let you observe the concept in a live Claude Code session.
+You will inspect `~/.claude/` files, analyze transcripts from the {claude-code-transcripts-url}[claude-code-transcripts] repository, and run targeted experiments to confirm your mental model.
+
+*Build With It*::
+Apply the concept to the Personal Learning Path Manager.
+Each module's build section advances the project by one meaningful increment, so the architecture knowledge and the working application grow in lockstep.
+
+== Module Map
+
+[cols="1,3,3,3",options="header"]
+|===
+|Module |Title |Architecture Concept |Build Milestone
+
+|1
+|xref:01-agentic-loop.adoc[The Agentic Loop]
+|Six-step cycle: input, context, reasoning, permissions, tools, loop
+|Scaffold project with uv + FastAPI
+
+|2
+|xref:02-context-memory.adoc[Context & Memory]
+|4-level CLAUDE.md hierarchy, @includes, granular rules
+|Configure project memory and settings
+
+|3
+|xref:03-tools-dispatch.adoc[Tools & Tool Dispatch]
+|Built-in tools, checkPermissions, tool selection
+|Postgres schema, Pydantic models, CRUD API
+
+|4
+|xref:04-permissions-trust.adoc[Permissions & Trust]
+|6 permission modes, rules, bash patterns
+|Project permission rules
+
+|5
+|xref:05-hooks-lifecycle.adoc[Hooks & Lifecycle]
+|6 events, 4 hook types, exit codes
+|Auto-format, test, lint hooks
+
+|6
+|xref:06-skills-workflows.adoc[Skills & Workflows]
+|SKILL.md, namespacing, arguments, paths
+|Custom project skills
+
+|7
+|xref:07-extending-claude-code.adoc[Extending Claude Code]
+|Superpowers, marketplaces, ecosystem
+|Asset tagging via guided workflow
+
+|8
+|xref:08-mcp-servers.adoc[MCP Servers]
+|Protocol, transports, config, safety
+|Custom FastMCP server for RSS ingestion
+
+|9
+|xref:09-multi-agent.adoc[Multi-Agent Patterns]
+|Sub-agents, isolation, worktrees
+|React frontend via parallel agents
+
+|10
+|xref:10-sdk-integration.adoc[SDK & Integration]
+|Subprocess model, messages, sessions
+|CI automation script
+
+|C
+|xref:11-capstone.adoc[Capstone]
+|Full architecture review
+|Complete learning asset manager
+|===
+
+== Getting Started
+
+Before starting, verify your setup on the xref:00-prerequisites.adoc[Prerequisites] page.
+
+== Source Material
+
+This course draws on the following references:
+
+* {claude-code-docs-url}[Claude Code Official Documentation] -- the primary reference for features, configuration, and API
+* {claude-code-transcripts-url}[claude-code-transcripts] -- real Claude Code session transcripts used for introspection exercises
+* {claude-howto-url}[claude-howto] -- community-curated how-to guides and patterns
+* {claude-code-tips-url}[claude-code-tips] -- practical tips and techniques from the community

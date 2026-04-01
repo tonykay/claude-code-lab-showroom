@@ -1,0 +1,696 @@
+= Module 10: SDK & Integration
+:navtitle: SDK & Integration
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-9 complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, hooks, skills, the extension model, MCP servers, and multi-agent patterns
+* `~/learnpath` project scaffolded with FastAPI backend, React frontend, MCP server, hooks, skills, and CLAUDE.md
+* `.claude/settings.json` configured with permission rules, hooks, and skills from Modules 4-7
+* Python {python-version} and `uv` available
+====
+
+'''
+
+== Part 1: How It Works
+
+Every module so far has treated Claude Code as an interactive tool -- you type a prompt, Claude reasons and acts, you see the result in the terminal.
+But Claude Code is also a *programmable backend*.
+The same binary that runs your interactive sessions can be invoked by code, controlled by scripts, and embedded in CI pipelines.
+
+This is the SDK model: Claude Code as a subprocess, communicating over standard I/O with structured messages.
+
+=== The Subprocess Model
+
+Claude Code can be invoked programmatically by any host process that can spawn a child process and exchange data over stdin/stdout.
+
+The model is straightforward:
+
+1. The host process spawns `claude` as a subprocess
+2. Communication happens via JSON messages over stdin (commands in) and stdout (results out)
+3. The subprocess runs the same agentic loop as an interactive session -- same reasoning, same tool dispatch, same CLAUDE.md loading
+4. The host process parses JSON output and acts on the results
+
+This is exactly how IDE extensions (VS Code, JetBrains) integrate Claude Code.
+They do not use a special API or a proprietary protocol.
+They spawn the `claude` binary and talk to it over standard I/O.
+
+[mermaid]
+....
+flowchart LR
+    H["Host Process<br/>(script, IDE, CI)"] -->|"spawns"| C["Claude Code<br/>(subprocess)"]
+    C -->|"JSON messages<br/>via stdout"| H
+    H -->|"prompts / control<br/>via stdin"| C
+    C -->|"tool execution"| T["File system,<br/>bash, MCP tools"]
+    T -->|"results"| C
+
+    style H fill:#e8f4f8,stroke:#2c3e50
+    style C fill:#fef9e7,stroke:#2c3e50
+    style T fill:#d5f5e3,stroke:#2c3e50
+....
+
+The key insight: there is no separate "SDK version" of Claude Code.
+The interactive CLI and the programmatic subprocess are the same binary, the same agentic loop, the same tool dispatch.
+The only difference is how input arrives and how output is formatted.
+
+=== Output Formats
+
+Claude Code supports three output formats, controlled by the `--output` flag.
+Each serves a different use case.
+
+[cols="1,2,1,1",options="header"]
+|===
+|Format |Use Case |Real-time? |Structured?
+
+|`text`
+|Simple scripting, piping output to other commands, human-readable results
+|No
+|No
+
+|`json`
+|Programmatic access to results with metadata -- exit status, token usage, session info
+|No
+|Yes
+
+|`stream-json`
+|SDK integration, IDE extensions, real-time progress tracking
+|Yes
+|Yes
+|===
+
+==== `text` -- plain output
+
+The simplest mode.
+Claude processes the prompt and writes plain text to stdout.
+No metadata, no structure, just the response content.
+
+[source,bash]
+----
+claude -p "what is FastAPI?" --output text
+----
+
+Output is a plain string.
+Good for shell scripts where you just need the answer.
+
+==== `json` -- structured response
+
+Returns a single JSON object after Claude finishes processing.
+The object contains the response text plus metadata: session ID, token counts, model used, and cost information.
+
+[source,bash]
+----
+claude -p "list 3 Python web frameworks" --output json
+----
+
+Example output:
+
+[source,json]
+----
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "1. FastAPI\n2. Django\n3. Flask",
+  "session_id": "abc123...",
+  "cost_usd": 0.003,
+  "duration_ms": 1200,
+  "is_error": false
+}
+----
+
+==== `stream-json` -- streaming messages
+
+Returns a sequence of newline-delimited JSON messages as Claude works.
+Each message has a `type` field indicating what kind of event it represents.
+This is the format used by SDK integrations and IDE extensions because it provides real-time visibility into what Claude is doing.
+
+[source,bash]
+----
+claude -p "explain REST APIs" --output stream-json
+----
+
+Messages arrive one per line as Claude processes the prompt.
+The stream includes system messages, assistant text chunks, tool progress updates, and the final result.
+
+=== Initialization Handshake
+
+When using Claude Code in full SDK mode (not just `--print`), the host process performs an initialization handshake.
+The host sends an `initialize` control request, and Claude responds with:
+
+* Available commands and tools
+* Current model and account information
+* Agent configuration
+* Session capabilities
+
+This handshake is required before the host can send prompts in SDK mode.
+It establishes the session and tells the host what Claude can do.
+
+For simple scripting with `--print`, no handshake is needed -- you just run the command and capture output.
+
+=== Message Types
+
+In `stream-json` mode, Claude sends back messages with different types.
+Understanding these types is essential for building integrations.
+
+==== `system`
+
+System-level messages about the session state.
+Sent at the beginning of a session and during initialization.
+
+[source,json]
+----
+{
+  "type": "system",
+  "subtype": "init",
+  "session_id": "session_abc123",
+  "tools": ["Read", "Edit", "Bash", "Grep", "Glob", "Write"]
+}
+----
+
+==== `assistant`
+
+Claude's text responses.
+In streaming mode, these arrive as chunks that the host concatenates.
+
+[source,json]
+----
+{
+  "type": "assistant",
+  "content": "FastAPI is a modern, high-performance web framework for building APIs with Python.",
+  "stop_reason": "end_turn"
+}
+----
+
+==== `tool_progress`
+
+Updates during tool execution.
+Sent while a tool is running to provide real-time feedback.
+
+[source,json]
+----
+{
+  "type": "tool_progress",
+  "tool": "Bash",
+  "status": "running",
+  "content": "Executing: uv run pytest --tb=short"
+}
+----
+
+==== `result`
+
+The final result of a completed operation.
+Contains the response content, cost information, and success/error status.
+
+[source,json]
+----
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "All 12 tests passed.",
+  "cost_usd": 0.005,
+  "duration_ms": 3400,
+  "is_error": false
+}
+----
+
+==== `stream_event`
+
+Low-level streaming events during text generation.
+These provide token-by-token updates for UIs that want to display text as it is generated.
+
+[source,json]
+----
+{
+  "type": "stream_event",
+  "event": "content_block_delta",
+  "delta": "Fast"
+}
+----
+
+=== Session Management
+
+Every Claude Code invocation -- interactive or headless -- creates a session with a unique ID.
+Sessions are the unit of conversation state.
+
+==== Transcripts
+
+Sessions are stored as JSON transcripts in `~/.claude/projects/`.
+Each transcript records every message exchanged, every tool call made, and every result returned.
+The transcripts from headless invocations are identical in structure to interactive ones -- same agentic loop, same data.
+
+==== Session Resume
+
+You can resume a previous session to continue where you left off:
+
+[source,bash]
+----
+claude --resume           # <1>
+claude --continue         # <2>
+----
+<1> Shows a list of recent sessions and lets you pick one to resume
+<2> Continues the most recent session without prompting
+
+When you resume a session, Claude reloads the conversation history.
+The model sees all previous messages and tool results as if the conversation never stopped.
+
+==== Session Forking
+
+Resuming a session creates a *fork* -- a new session that starts with the context of the previous one but diverges from that point.
+The original session remains unchanged.
+This is useful when you want to explore a different direction from a previous conversation state without losing the original.
+
+=== Non-Interactive / Headless Mode
+
+The `--print` (or `-p`) flag runs Claude Code in headless mode: no interactive UI, no permission prompts, just input and output.
+
+[source,bash]
+----
+claude -p "explain what this project does"          # <1>
+echo "list all API endpoints" | claude -p           # <2>
+claude -p "run the tests" --output json             # <3>
+----
+<1> Single prompt, text output to stdout
+<2> Piped input from another command
+<3> Headless with structured JSON output
+
+In headless mode:
+
+* There is no interactive terminal UI
+* Permission prompts are suppressed -- Claude operates within the permissions defined in `.claude/settings.json`
+* Exit code `0` means success, non-zero means failure
+* Output goes to stdout, errors to stderr
+
+Headless mode is the foundation for all CI/CD and scripting integrations.
+The same agentic loop runs, the same tools execute, but there is no human in the loop for permission decisions.
+
+[IMPORTANT]
+====
+Headless mode respects your `.claude/settings.json` permissions.
+If a tool is not allowed, Claude cannot use it in headless mode either.
+Configure your permissions (Module 4) before running headless automations.
+====
+
+=== Integration Patterns
+
+The subprocess model enables several integration patterns:
+
+==== IDE Extensions
+
+VS Code and JetBrains extensions spawn Claude Code as a subprocess.
+They use `stream-json` output to display real-time progress in the editor.
+The extension acts as the host process, sending prompts and rendering Claude's responses in the IDE's UI.
+
+==== CI/CD Pipelines
+
+CI systems run Claude Code headlessly to perform automated code review, test analysis, or documentation generation.
+Each CI step invokes `claude -p` with a specific prompt and captures the output.
+
+==== Custom Agents
+
+You can build orchestration scripts that spawn multiple Claude instances -- each working on a different task -- and aggregate the results.
+This is the subprocess equivalent of the multi-agent patterns from Module 9, but controlled by your own code instead of Claude's Agent tool.
+
+==== Automation Scripts
+
+Batch processing scripts that iterate over files, repositories, or tasks and invoke Claude for each one.
+For example: reviewing every pull request in a repository, generating documentation for every module, or running security analysis on every dependency.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: JSON Output Mode
+
+Run Claude in headless mode with JSON output and examine the response structure:
+
+[source,bash]
+----
+cd ~/learnpath
+claude -p "explain what FastAPI is in one sentence" --output json
+----
+
+The output is a single JSON object.
+Pipe it through `jq` to examine the structure:
+
+[source,bash]
+----
+claude -p "explain what FastAPI is in one sentence" --output json | jq '.'
+----
+
+Identify these fields in the output:
+
+* `type` -- should be `"result"`
+* `result` -- the actual response text
+* `session_id` -- unique identifier for this invocation
+* `cost_usd` -- how much the invocation cost
+* `is_error` -- whether the invocation failed
+
+Now extract just the result text:
+
+[source,bash]
+----
+claude -p "explain what FastAPI is in one sentence" --output json | jq -r '.result'
+----
+
+This is the pattern for scripting: invoke Claude, parse the JSON, extract the fields you need.
+
+=== Exercise 2: Streaming JSON
+
+Run Claude with streaming output and watch messages arrive in real time:
+
+[source,bash]
+----
+claude -p "list 5 Python testing frameworks with one sentence about each" --output stream-json
+----
+
+You will see multiple JSON objects, one per line, as Claude works.
+Watch for these message types in the stream:
+
+* `system` messages at the beginning
+* `assistant` messages with response content
+* A final `result` message with the complete response
+
+Compare this with the `json` output mode from Exercise 1.
+The `json` mode waits until Claude is completely done and returns one object.
+The `stream-json` mode sends messages as they happen -- this is what IDE extensions use to show real-time progress.
+
+=== Exercise 3: Session Management
+
+Explore how Claude manages sessions from headless invocations.
+
+First, list recent session data:
+
+[source,bash]
+----
+ls ~/.claude/projects/
+----
+
+Each directory corresponds to a project.
+Find the one that matches your learnpath project and explore its contents.
+
+Now run a headless invocation and then resume it interactively:
+
+[source,bash]
+----
+claude -p "read main.py and list all the route handlers" --output json | jq -r '.session_id'
+----
+
+Save that session ID.
+Then resume it:
+
+[source,bash]
+----
+claude --resume
+----
+
+Select the session you just ran.
+Notice that Claude has the context from the headless invocation -- it already knows about the route handlers.
+This proves that headless and interactive sessions use the same session storage.
+
+Try continuing the most recent session directly:
+
+[source,bash]
+----
+claude --continue
+----
+
+Claude picks up where the last session left off, whether that session was interactive or headless.
+
+=== Exercise 4: Headless Scripting
+
+Run Claude with piped input and capture output to a file:
+
+[source,bash]
+----
+cd ~/learnpath
+echo "what files are in this project?" | claude -p --output text > /tmp/project_files.txt
+cat /tmp/project_files.txt
+----
+
+Check the exit code to verify success:
+
+[source,bash]
+----
+echo "what files are in this project?" | claude -p --output text > /dev/null 2>&1
+echo $?
+----
+
+A `0` exit code means Claude completed successfully.
+Non-zero means something went wrong -- check stderr for details.
+
+Now compare the transcript from a headless invocation with an interactive one.
+Both are stored in the same format under `~/.claude/projects/`.
+The structure is identical: same message types, same tool calls, same result format.
+The only difference is how the session was initiated -- no interactive UI elements in the headless transcript.
+
+'''
+
+== Part 3: Build With It
+
+You will build a CI automation script that invokes Claude Code headlessly to run tests, check code quality, and generate a summary report.
+This is a practical application of the subprocess model -- your Python script is the host process, and each Claude invocation is an independent subprocess.
+
+=== Step 1: Create the CI Script
+
+Create the scripts directory and the automation script:
+
+[source,bash]
+----
+mkdir -p ~/learnpath/scripts
+----
+
+Create `~/learnpath/scripts/ci_check.py` with the following content:
+
+[source,python]
+----
+#!/usr/bin/env python3
+"""CI automation using Claude Code as a headless subprocess."""
+import subprocess
+import json
+import sys
+
+
+def run_claude(prompt: str, cwd: str = None) -> dict:
+    """Run Claude Code headlessly and return the JSON result.
+
+    Each invocation spawns an independent Claude subprocess.
+    The subprocess runs the full agentic loop -- same reasoning,
+    same tool dispatch -- but with no interactive UI.
+    """
+    cmd = ["claude", "-p", prompt, "--output", "json"]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=cwd or "/root/learnpath",
+    )
+    if result.returncode != 0:
+        print(f"Claude Code failed (exit {result.returncode}):", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        sys.exit(1)
+    return json.loads(result.stdout)
+
+
+def main():
+    project_dir = str(
+        subprocess.run(
+            ["readlink", "-f", "../"],
+            capture_output=True,
+            text=True,
+            cwd=__file__.rsplit("/", 1)[0] or ".",
+        ).stdout.strip()
+        or "~/learnpath"
+    )
+
+    print("=" * 60)
+    print("CI Check -- Claude Code Headless Automation")
+    print("=" * 60)
+
+    # Step 1: Run tests
+    print("\n[1/3] Running test suite...")
+    test_result = run_claude(
+        "Run 'uv run pytest --tb=short -q' and report: "
+        "1. Total tests, passed, failed "
+        "2. Any failing test names and one-line error summaries "
+        "3. Overall status: PASS or FAIL",
+        cwd=project_dir,
+    )
+    print(test_result.get("result", "No result returned"))
+
+    # Step 2: Check code quality
+    print("\n[2/3] Checking code quality...")
+    quality_result = run_claude(
+        "Run 'uv run ruff check src/' and report: "
+        "1. Total issues found "
+        "2. Issue categories and counts "
+        "3. Files with the most issues",
+        cwd=project_dir,
+    )
+    print(quality_result.get("result", "No result returned"))
+
+    # Step 3: Generate summary
+    print("\n[3/3] Generating CI summary...")
+    summary = run_claude(
+        "Based on the current project state, write a 3-line CI summary: "
+        "Line 1: test status (pass/fail with counts). "
+        "Line 2: code quality status (issues found or clean). "
+        "Line 3: overall readiness (ready to merge / needs work).",
+        cwd=project_dir,
+    )
+    print(summary.get("result", "No result returned"))
+
+    print("\n" + "=" * 60)
+    print("CI Check complete.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+----
+
+Make it executable:
+
+[source,bash]
+----
+chmod +x ~/learnpath/scripts/ci_check.py
+----
+
+=== Step 2: Run the Script
+
+[source,bash]
+----
+cd ~/learnpath
+python scripts/ci_check.py
+----
+
+Watch what happens:
+
+1. The script spawns three independent Claude subprocesses, one after another.
+2. Each subprocess runs the full agentic loop: it reads your prompt, decides to use the Bash tool, runs the command, interprets the output, and returns a structured result.
+3. Each invocation is completely independent -- like the zero-context isolation from Module 9, but enforced by the operating system (separate processes) rather than by Claude's agent framework.
+
+[NOTE]
+====
+Each `run_claude()` call is an independent subprocess.
+There is no shared context between invocations.
+The second call does not know what the first call found.
+This is by design -- each step is self-contained and independently verifiable.
+====
+
+=== Step 3: Examine the Subprocess Behavior
+
+Each `run_claude()` call follows the same pattern:
+
+1. **Spawn.** `subprocess.run()` creates a new `claude` process.
+2. **Input.** The prompt is passed via the `-p` flag (command-line argument).
+3. **Execution.** Claude runs its agentic loop -- reasoning, tool calls, observation.
+4. **Output.** The result is written to stdout as JSON.
+5. **Termination.** The subprocess exits. Its context is discarded.
+
+This is the same lifecycle that IDE extensions use.
+VS Code does not have special access to Claude's internals -- it spawns a subprocess, sends prompts, and parses JSON responses.
+
+=== Step 4: Extend the Script
+
+Add a coverage check step to the script:
+
+[source,python]
+----
+    # Step 4: Coverage analysis
+    print("\n[4/4] Analyzing test coverage...")
+    coverage_result = run_claude(
+        "Run 'uv run pytest --cov=src --cov-report=term-missing -q' and report: "
+        "1. Overall coverage percentage "
+        "2. Files with lowest coverage "
+        "3. Specific lines/functions missing coverage",
+        cwd=project_dir,
+    )
+    print(coverage_result.get("result", "No result returned"))
+----
+
+Other extensions you could add:
+
+* *Dependency audit:* Ask Claude to check for outdated or vulnerable dependencies.
+* *API documentation check:* Ask Claude to verify that all endpoints have docstrings.
+* *Migration check:* Ask Claude to verify that database models and migrations are in sync.
+
+Each extension is just another `run_claude()` call with a different prompt.
+The subprocess model makes it trivial to add new CI steps.
+
+=== Step 5: Transcript Review
+
+After running the CI script, find the transcripts created by the headless invocations:
+
+[source,bash]
+----
+ls -lt ~/.claude/projects/ | head -5
+----
+
+Locate the session data for your project directory and examine the transcripts.
+
+Compare headless transcripts with interactive transcripts from earlier modules:
+
+[cols="1,3,3",options="header"]
+|===
+|Aspect |Interactive Session |Headless Invocation
+
+|Initiation
+|User types in the REPL
+|`claude -p` with a prompt string
+
+|Permission handling
+|Interactive prompts ask the user
+|Relies entirely on `.claude/settings.json` rules
+
+|UI rendering
+|Full terminal UI with status, progress, formatting
+|No UI -- raw output to stdout
+
+|Tool execution
+|Same agentic loop, same tool dispatch
+|Same agentic loop, same tool dispatch
+
+|Transcript format
+|JSON with message history and tool results
+|Identical JSON with message history and tool results
+
+|Session storage
+|`~/.claude/projects/` with session ID
+|Same location, same format
+|===
+
+The core observation: *the agentic loop is identical*.
+Headless mode does not use a simplified version of Claude.
+It runs the full reasoning and tool dispatch pipeline.
+The only difference is the input/output interface -- no interactive terminal, no permission prompts.
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* Working CI automation script at `~/learnpath/scripts/ci_check.py` that invokes Claude Code headlessly
+* Experience with all three output formats: `text`, `json`, `stream-json`
+* Understanding of session management: resume, continue, and fork
+* Transcript evidence showing that headless and interactive sessions use the same agentic loop
+
+*Understanding check:* You should be able to:
+
+1. Explain the subprocess model -- how a host process spawns and communicates with Claude Code
+2. Choose the right output format for a given use case (text for scripts, json for structured access, stream-json for real-time integration)
+3. Write a script that invokes Claude Code headlessly and parses the JSON result
+4. Describe how IDE extensions use the same subprocess model as your CI script
+5. Explain session management: resume, continue, and fork
+6. Describe the initialization handshake and when it is needed vs. when simple `--print` mode suffices
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-docs-url}/reference/sdk/overview[SDK Overview]
+* {claude-code-docs-url}/reference/commands/cli-flags[CLI Flags Reference]
+
+'''
+
+Next: xref:11-capstone.adoc[Module 11: Capstone Project]

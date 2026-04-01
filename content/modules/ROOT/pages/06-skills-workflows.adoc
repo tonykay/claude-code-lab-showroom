@@ -1,0 +1,815 @@
+= Module 6: Skills & Workflows
+:navtitle: Skills & Workflows
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-5 complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, and hooks
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, and CRUD API endpoints
+* `CLAUDE.md` and `.claude/settings.json` configured with permission rules and hooks from Modules 4 and 5
+====
+
+'''
+
+== Part 1: How It Works
+
+In Module 5 you learned how hooks attach to lifecycle events and fire automatically.
+Skills are the other side of the extensibility coin: explicit, repeatable workflows that you invoke on demand.
+
+Hooks are automatic side effects.
+Skills are invocable workflows.
+
+Together they give you two complementary ways to extend Claude Code without modifying its internals.
+
+=== What Skills Are
+
+A skill is a reusable, markdown-based workflow definition that extends Claude Code with custom capabilities.
+When you invoke a skill, Claude reads the skill's instructions and follows them as if you had typed those instructions yourself -- but with structure, consistency, and repeatability that freeform prompts cannot match.
+
+Think of the difference this way:
+
+* *Without skills:* "Hey Claude, run Alembic to migrate the database, then check the current migration status and report back." You type this every time, with slight variations, and sometimes forget a step.
+* *With skills:* `/db:migrate` -- same workflow, every time, with inline shell commands that capture live state.
+
+Skills encode tribal knowledge into executable workflows.
+The migration procedure, the scaffolding conventions, the test coverage analysis -- all captured once, used repeatedly by anyone on the team.
+
+=== Skill Anatomy
+
+A skill is a directory containing a `SKILL.md` file.
+That file has two parts: YAML frontmatter (between `---` delimiters) and a markdown instruction body.
+
+[source]
+----
+.claude/skills/
+└── my-skill/
+    └── SKILL.md
+----
+
+Here is a minimal `SKILL.md`:
+
+[source,markdown]
+----
+---
+name: greet
+description: Greet the user
+user-invocable: true
+---
+Say hello to the user and wish them a productive coding session.
+----
+
+The frontmatter declares metadata -- what the skill is called, when it should activate, what tools it can use.
+The body is the actual instruction set that Claude follows when the skill is invoked.
+
+=== Frontmatter Options
+
+Every frontmatter key is optional.
+The minimum viable skill needs only a body (no frontmatter at all), but frontmatter is what makes skills discoverable, controllable, and composable.
+
+[cols="1,2,2",options="header"]
+|===
+|Key |Type |Purpose
+
+|`name`
+|String
+|Display name shown in slash command completion and skill listings.
+
+|`description`
+|String
+|What the skill does. Used for discovery and for Claude to determine relevance during auto-activation.
+
+|`argument-hint`
+|String
+|Placeholder text shown after the slash command, e.g., `<entity-name>`. Tells the user what arguments the skill expects.
+
+|`allowed-tools`
+|List of strings
+|Restrict which tools the skill can use. If omitted, the skill can use all tools available to the session. Use this to create constrained skills that cannot, for example, run Bash commands.
+
+|`when_to_use`
+|String
+|Auto-activation guidance. Describes conditions under which Claude should invoke this skill without being asked. Example: "Use this when the user asks to scaffold a new API endpoint."
+
+|`model`
+|String
+|Model override for this skill. Lets you run a specific skill on a different model than the session default.
+
+|`user-invocable`
+|Boolean
+|Whether the skill appears as a slash command. Set to `true` for skills you invoke directly. Set to `false` (or omit) for skills that are only triggered by auto-activation or other skills.
+
+|`paths`
+|List of glob patterns
+|Conditional activation. The skill only activates when Claude is working on files matching these patterns. Example: `["src/**/*.py"]` limits the skill to Python source files.
+
+|`version`
+|String
+|Skill version identifier. Useful for tracking changes to shared team skills.
+
+|`hooks`
+|Object
+|Skill-specific hooks that run during the skill's execution. Same format as settings.json hooks but scoped to this skill only.
+|===
+
+=== Storage Locations
+
+Skills can live in two places:
+
+[cols="1,2,2",options="header"]
+|===
+|Location |Path |Use Case
+
+|*Project*
+|`.claude/skills/` in the project directory
+|Team-shared skills committed to git. Everyone on the team gets the same workflows.
+
+|*User*
+|`~/.claude/skills/`
+|Personal skills that apply across all projects. Your private productivity shortcuts.
+|===
+
+Project skills take precedence when names collide.
+This lets you override a personal skill with a project-specific version.
+
+=== Invocation and Arguments
+
+Skills that have `user-invocable: true` in their frontmatter appear as slash commands.
+You invoke them by typing `/skill-name` in the Claude Code prompt.
+
+Arguments are passed after the skill name:
+
+[source,bash]
+----
+/hello World
+----
+
+Inside the skill body, arguments are available via the `$ARGUMENTS` variable:
+
+[source,markdown]
+----
+---
+name: hello
+description: Greet someone
+user-invocable: true
+argument-hint: "<name>"
+---
+Greet the user by name. The name is: $ARGUMENTS
+If no name was provided, greet them as "developer".
+----
+
+When you type `/hello World`, Claude sees the instruction body with `$ARGUMENTS` replaced by `World`.
+
+Named variables are also supported for skills that need structured input, but `$ARGUMENTS` covers most use cases.
+
+=== Namespacing
+
+Nested directories create colon-separated commands.
+This gives you clean, organized skill hierarchies:
+
+[source]
+----
+.claude/skills/db/migrate/SKILL.md     → /db:migrate
+.claude/skills/db/seed/SKILL.md        → /db:seed
+.claude/skills/db/status/SKILL.md      → /db:status
+.claude/skills/api/scaffold/SKILL.md   → /api:scaffold
+.claude/skills/test/coverage/SKILL.md  → /test:coverage
+----
+
+The directory structure *is* the namespace.
+No configuration needed -- just organize your directories and the colon-separated commands appear automatically.
+
+This is useful for projects with many skills.
+Grouping related skills under a common prefix (`db:`, `api:`, `test:`) keeps the slash command list organized and discoverable.
+
+=== Inline Shell Commands
+
+Skill bodies can include inline shell commands prefixed with `!`.
+These commands run against the live project state and inject their output into the skill's context.
+
+[source,markdown]
+----
+---
+name: test-status
+description: Report current test status
+user-invocable: true
+---
+Here is the current test status:
+!uv run pytest --tb=short
+
+Analyze the output above. Report:
+1. Total tests, passed, failed, errors
+2. If any tests failed, identify the root cause
+3. Suggest fixes for failing tests
+----
+
+When Claude processes this skill, it runs `uv run pytest --tb=short` and injects the real output into the instruction body before reasoning about it.
+This is different from Claude deciding to run pytest on its own -- the inline shell command guarantees that specific command runs with those specific flags, every time.
+
+Inline shell commands are powerful for:
+
+* Capturing current state (test results, migration status, database row counts)
+* Running diagnostic commands (disk usage, process lists, git status)
+* Gathering context that the skill's instructions need to make decisions
+
+=== Conditional Activation
+
+The `paths` frontmatter option controls when a skill activates.
+Skills with path patterns only appear (and only auto-activate) when Claude is working on files that match those patterns.
+
+[source,yaml]
+----
+paths: ["src/**/*.py"]
+----
+
+This skill only activates when Claude is working on Python files under `src/`.
+If you are editing a JavaScript file or a configuration YAML, the skill does not appear in the slash command list and does not auto-activate.
+
+Conditional activation prevents skill clutter.
+A project with 20 skills can stay manageable if each skill is scoped to the files it is relevant to.
+
+=== Skills vs Hooks Decision Matrix
+
+Skills and hooks both extend Claude Code, but they serve different purposes.
+Use this matrix to decide which to use:
+
+[cols="2,1,1",options="header"]
+|===
+|Scenario |Use a Skill |Use a Hook
+
+|Explicit workflow you invoke on demand
+|Yes
+|No
+
+|Automatic side effect on lifecycle events
+|No
+|Yes
+
+|Needs arguments from the user
+|Yes
+|No
+
+|Should run silently in the background
+|No
+|Yes
+
+|Encodes a multi-step procedure with decisions
+|Yes
+|No
+
+|Enforces a quality gate (tests must pass)
+|No
+|Yes
+
+|Captures tribal knowledge as a repeatable recipe
+|Yes
+|No
+
+|Formats code after every edit
+|No
+|Yes
+|===
+
+The rule of thumb: if you type it as a command, it is a skill.
+If it should happen automatically without your involvement, it is a hook.
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Discover Available Skills
+
+Start a Claude Code session and use tab completion to see what skills are available.
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Inside the session, type `/` and press Tab.
+You will see a list of available slash commands, including both built-in commands and any skills that have been defined.
+
+Now examine the structure of a skill file.
+If your installation includes built-in skills, read one:
+
+[source,bash]
+----
+ls -la ~/.claude/skills/ 2>/dev/null || echo "No user skills directory yet"
+ls -la ~/learnpath/.claude/skills/ 2>/dev/null || echo "No project skills directory yet"
+----
+
+Note which skills are `user-invocable: true` (they appear as slash commands) versus those that rely on `when_to_use` for auto-activation.
+Skills without `user-invocable: true` are background skills -- Claude activates them when it determines they are relevant, based on the `when_to_use` and `paths` fields.
+
+=== Exercise 2: Create a Minimal Skill
+
+Create your first skill -- a simple greeting that demonstrates the core mechanics.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/hello
+----
+
+Create the file `~/learnpath/.claude/skills/hello/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: hello
+description: A simple greeting skill
+user-invocable: true
+argument-hint: "<name>"
+---
+Greet the user by name. The name is: $ARGUMENTS
+
+If no name was provided, greet them as "developer".
+
+Keep the greeting brief and professional -- one or two sentences.
+----
+
+Now invoke it:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/hello World"
+----
+
+Expected output: Claude greets "World" by name.
+
+Test without arguments:
+
+[source,bash]
+----
+claude "/hello"
+----
+
+Expected output: Claude greets "developer" (the fallback).
+
+This exercise confirms the core skill mechanics: frontmatter parsing, `$ARGUMENTS` substitution, and slash command invocation.
+
+=== Exercise 3: Namespaced Skill
+
+Create a namespaced skill to verify the directory-to-colon mapping.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/db/status
+----
+
+Create the file `~/learnpath/.claude/skills/db/status/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: db:status
+description: Check database connectivity and report table statistics
+user-invocable: true
+---
+Check the database status by running the following command:
+
+!psql -h localhost -U learnpath -d learnpath -c "SELECT count(*) FROM topics;" 2>&1
+
+If the command succeeded, report the row count.
+If it failed (connection refused, table not found, etc.), report the error
+and suggest troubleshooting steps:
+1. Is PostgreSQL running?
+2. Does the database exist?
+3. Does the table exist? Run migrations if needed.
+----
+
+Invoke it with the colon-separated name:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/db:status"
+----
+
+The skill runs the inline `psql` command and Claude reports the results.
+If PostgreSQL is not running or the database does not exist, Claude will report the error and suggest fixes -- that behavior is encoded in the skill instructions.
+
+The key takeaway: the directory path `.claude/skills/db/status/` automatically maps to the slash command `/db:status`.
+
+=== Exercise 4: Conditional Activation
+
+Create a skill that only activates when working on Python files.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/py-review
+----
+
+Create the file `~/learnpath/.claude/skills/py-review/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: py-review
+description: Review Python code for common issues
+user-invocable: true
+paths: ["**/*.py"]
+---
+Review the current Python file for:
+1. Missing type hints on function signatures
+2. Functions longer than 20 lines
+3. Missing docstrings on public functions
+4. Import ordering (stdlib, third-party, local)
+
+Report findings as a numbered list with file:line references.
+----
+
+Test with a Python file:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "Review src/learnpath/main.py"
+----
+
+The `/py-review` skill should appear in the slash command list during this session because you are working with Python files.
+
+Now test with a non-Python file:
+
+[source,bash]
+----
+claude "Review the README.md file"
+----
+
+When working exclusively with non-Python files, the `py-review` skill does not activate and does not appear in slash command completion.
+This demonstrates how `paths` keeps your skill list relevant to the files you are actually working on.
+
+'''
+
+== Part 3: Build With It
+
+Now create three production skills for the `{project-name}` project.
+These skills encode real workflows that you would otherwise type out manually every time.
+
+=== Skill 1: `/db:migrate`
+
+This skill runs Alembic database migrations and reports the current state.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/db/migrate
+----
+
+Create the file `~/learnpath/.claude/skills/db/migrate/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: db:migrate
+description: Run Alembic database migrations and report status
+user-invocable: true
+argument-hint: "[revision]"
+allowed-tools: ["Bash", "Read"]
+version: "1.0"
+---
+Run database migrations for the learnpath project.
+
+## Step 1: Check current migration state
+
+!uv run alembic current 2>&1
+
+## Step 2: Run migrations
+
+If $ARGUMENTS is provided, migrate to that specific revision:
+```
+uv run alembic upgrade $ARGUMENTS
+```
+
+If no argument is provided, migrate to the latest revision:
+```
+uv run alembic upgrade head
+```
+
+Run the appropriate migration command now.
+
+## Step 3: Verify migration state
+
+After running the migration, check the new state:
+
+!uv run alembic current 2>&1
+
+## Step 4: Report
+
+Report the following:
+1. Previous migration state (from Step 1)
+2. Migration command that was executed
+3. Current migration state (from Step 3)
+4. Any errors encountered and suggested fixes
+
+If the migration failed due to a missing migration file, suggest running
+`uv run alembic revision --autogenerate -m "description"` to create one.
+----
+
+Test it:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/db:migrate"
+----
+
+Expected behavior: Claude checks the current Alembic state, runs `alembic upgrade head`, checks the new state, and reports the results.
+If Alembic is not configured yet, Claude reports the error and suggests setup steps.
+
+=== Skill 2: `/api:scaffold-endpoint`
+
+This skill scaffolds a complete CRUD endpoint from an entity name.
+It encodes the project's conventions so every new endpoint follows the same structure.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/api/scaffold
+----
+
+Create the file `~/learnpath/.claude/skills/api/scaffold/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: api:scaffold-endpoint
+description: Scaffold a complete CRUD endpoint for a new entity
+user-invocable: true
+argument-hint: "<entity-name>"
+version: "1.0"
+---
+Scaffold a full CRUD endpoint for the entity: $ARGUMENTS
+
+If no entity name was provided, ask the user for one before proceeding.
+
+## Project Conventions
+
+This project uses:
+- **FastAPI** for routing
+- **Pydantic V2** for request/response models (use `model_config = ConfigDict(from_attributes=True)`)
+- **SQLAlchemy** for ORM models
+- **uv** as the package manager
+- Source code lives in `src/learnpath/`
+- Tests live in `tests/`
+
+## Files to Create
+
+For an entity named `$ARGUMENTS` (use singular lowercase for the entity, plural for the collection):
+
+### 1. Pydantic Schemas — `src/learnpath/schemas/{entity}.py`
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+class {Entity}Base(BaseModel):
+    # Add common fields here — ask the user what fields the entity needs
+    name: str
+
+class {Entity}Create({Entity}Base):
+    pass
+
+class {Entity}Update(BaseModel):
+    name: str | None = None
+
+class {Entity}Response({Entity}Base):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+```
+
+### 2. SQLAlchemy Model — `src/learnpath/models/{entity}.py`
+
+```python
+from sqlalchemy import Column, Integer, String
+from learnpath.database import Base
+
+class {Entity}(Base):
+    __tablename__ = "{entities}"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+```
+
+### 3. FastAPI Router — `src/learnpath/routers/{entity}.py`
+
+Include these endpoints:
+- `GET /{entities}/` — list all (with pagination: skip, limit)
+- `GET /{entities}/{id}` — get by ID (404 if not found)
+- `POST /{entities}/` — create (201 response)
+- `PUT /{entities}/{id}` — update (404 if not found)
+- `DELETE /{entities}/{id}` — delete (204 response, 404 if not found)
+
+Use dependency injection for the database session.
+
+### 4. Test File — `tests/test_{entity}.py`
+
+Write tests for all five endpoints:
+- Test create returns 201 and the created entity
+- Test list returns a list
+- Test get by ID returns the entity
+- Test get with invalid ID returns 404
+- Test update modifies the entity
+- Test delete returns 204
+- Test delete with invalid ID returns 404
+
+Use the `client` test fixture from `conftest.py`.
+
+### 5. Wire It Up
+
+Add the new router to `src/learnpath/main.py`:
+```python
+from learnpath.routers.{entity} import router as {entity}_router
+app.include_router({entity}_router, prefix="/{entities}", tags=["{entities}"])
+```
+
+## After Scaffolding
+
+Run the tests to verify everything works:
+
+```bash
+uv run pytest tests/test_{entity}.py -v
+```
+
+Report which files were created and whether tests pass.
+----
+
+Test it:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/api:scaffold-endpoint category"
+----
+
+Expected behavior: Claude creates four files (schema, model, router, tests), wires the router into `main.py`, and runs the tests.
+The entity name "category" flows through `$ARGUMENTS` into every file path and class name.
+
+[TIP]
+====
+This skill demonstrates why skills are more powerful than freeform prompts.
+The scaffold instructions encode 50+ lines of project conventions.
+Without the skill, you would need to specify all of this every time you add an endpoint -- or hope Claude guesses your conventions correctly.
+====
+
+=== Skill 3: `/test:coverage`
+
+This skill runs pytest with coverage analysis and provides actionable recommendations.
+
+[source,bash]
+----
+mkdir -p ~/learnpath/.claude/skills/test/coverage
+----
+
+Create the file `~/learnpath/.claude/skills/test/coverage/SKILL.md`:
+
+[source,markdown]
+----
+---
+name: test:coverage
+description: Run test coverage analysis and suggest improvements
+user-invocable: true
+argument-hint: "[module-path]"
+allowed-tools: ["Bash", "Read"]
+version: "1.0"
+---
+Run test coverage analysis for the learnpath project.
+
+## Step 1: Run coverage
+
+If $ARGUMENTS specifies a module path, run coverage for that module:
+```bash
+uv run pytest --cov=$ARGUMENTS --cov-report=term-missing -v
+```
+
+If no argument, run coverage for the entire project:
+
+!uv run pytest --cov=src/learnpath --cov-report=term-missing -v 2>&1
+
+## Step 2: Analyze Results
+
+From the coverage output, identify:
+
+1. **Overall coverage percentage** — is it above 80%? Above 90%?
+2. **Files with lowest coverage** — which files have the most uncovered lines?
+3. **Missing line ranges** — what specific lines are not covered?
+
+## Step 3: Read Uncovered Code
+
+For the three files with the lowest coverage, read the uncovered line ranges
+to understand what code is not tested.
+
+## Step 4: Recommendations
+
+For each uncovered section, suggest a specific test:
+- What the test should verify
+- Which test file it belongs in
+- A brief code sketch of the test
+
+Format as a prioritized list, ordered by impact:
+1. Untested error handling (highest priority — these are the bugs you ship)
+2. Untested business logic (medium priority)
+3. Untested happy paths (lower priority — usually already covered)
+
+## Step 5: Summary
+
+Report:
+- Current coverage: X%
+- Files analyzed: N
+- Tests suggested: M
+- Estimated coverage after adding suggested tests: ~Y%
+----
+
+Test it:
+
+[source,bash]
+----
+cd ~/learnpath
+claude "/test:coverage"
+----
+
+Expected behavior: Claude runs pytest with coverage, reads the uncovered lines, and produces a prioritized list of test suggestions with code sketches.
+
+Test with a specific module:
+
+[source,bash]
+----
+claude "/test:coverage src/learnpath/routers"
+----
+
+Expected behavior: Coverage scoped to just the routers module.
+
+=== Verify the Complete Skill Set
+
+List all skills to confirm the directory structure:
+
+[source,bash]
+----
+find ~/learnpath/.claude/skills -name "SKILL.md" | sort
+----
+
+Expected output:
+
+[source]
+----
+/home/user/learnpath/.claude/skills/api/scaffold/SKILL.md
+/home/user/learnpath/.claude/skills/db/migrate/SKILL.md
+/home/user/learnpath/.claude/skills/db/status/SKILL.md
+/home/user/learnpath/.claude/skills/hello/SKILL.md
+/home/user/learnpath/.claude/skills/py-review/SKILL.md
+/home/user/learnpath/.claude/skills/test/coverage/SKILL.md
+----
+
+These map to slash commands:
+
+[cols="1,2",options="header"]
+|===
+|Slash Command |Purpose
+
+|`/hello`
+|Simple greeting (exercise skill)
+
+|`/db:status`
+|Check database connectivity
+
+|`/db:migrate`
+|Run Alembic migrations
+
+|`/api:scaffold-endpoint`
+|Scaffold a CRUD endpoint
+
+|`/test:coverage`
+|Coverage analysis with recommendations
+
+|`/py-review`
+|Python code review (conditional on `.py` files)
+|===
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* Six skill directories under `~/learnpath/.claude/skills/` with valid `SKILL.md` files
+* Three production skills (`/db:migrate`, `/api:scaffold-endpoint`, `/test:coverage`) with arguments, namespacing, and inline shell commands
+* One conditionally activated skill (`/py-review`) scoped to Python files via `paths`
+* An understanding of how skills differ from hooks and when to use each
+
+*Understanding check:* You should be able to:
+
+1. Explain the structure of a `SKILL.md` file (frontmatter + body)
+2. List the two storage locations for skills and explain when to use each
+3. Create a namespaced skill by organizing directories
+4. Use `$ARGUMENTS` to pass user input into skill instructions
+5. Use inline shell commands (`!command`) to inject live project state
+6. Use `paths` frontmatter to limit skill activation to specific file types
+7. Decide whether a given workflow should be a skill or a hook
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* {claude-code-transcripts-url}[claude-code-transcripts] -- session introspection CLI
+* Local architecture reference: `assets/site/guides/skills.html` in this course repository
+
+'''
+
+Next: xref:07-extending-claude-code.adoc[Module 7: Extending Claude Code]

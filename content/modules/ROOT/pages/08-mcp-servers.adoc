@@ -1,0 +1,690 @@
+= Module 8: MCP Servers
+:navtitle: MCP Servers
+:source-highlighter: rouge
+:icons: font
+
+[NOTE.prerequisites]
+====
+* Modules 1-7 complete -- you understand the agentic loop, context assembly, tool dispatch, permissions, hooks, skills, and extension model
+* `~/learnpath` project scaffolded with FastAPI, Pydantic V2 models, CRUD API endpoints, tags, and custom skills
+* `CLAUDE.md` and `.claude/settings.json` configured with permission rules, hooks, and skills from Modules 4-7
+* Python {python-version} and `uv` available
+====
+
+'''
+
+== Part 1: How It Works
+
+Every module so far has extended Claude Code from the inside: rules in `CLAUDE.md`, permission gates, lifecycle hooks, invocable skills.
+MCP flips the direction.
+Instead of configuring Claude Code's internal behavior, you connect it to external services that expose new capabilities.
+
+=== What MCP Is
+
+MCP -- the *Model Context Protocol* -- is an open standard for connecting AI assistants to external services.
+The protocol defines how a client (Claude Code) communicates with a server (your service) to discover and invoke tools.
+
+The relationship is simple:
+
+* Claude Code is an MCP *client*. It discovers available tools, decides when to call them, and processes the results.
+* Your service is an MCP *server*. It registers tools with names, descriptions, and input schemas. When Claude calls a tool, the server executes it and returns a result.
+
+[mermaid]
+....
+flowchart LR
+    CC["Claude Code<br/>(MCP Client)"] <-->|"MCP Protocol"| MS["MCP Server"]
+    MS <--> ES["External Service<br/>(DB, API, filesystem, etc.)"]
+
+    style CC fill:#e8f4f8,stroke:#2c3e50
+    style MS fill:#fef9e7,stroke:#2c3e50
+    style ES fill:#d5f5e3,stroke:#2c3e50
+....
+
+From Claude Code's perspective, MCP tools are just tools.
+They appear in the same tool dispatch system you studied in Module 3.
+The model reasons about them the same way it reasons about built-in tools like `Bash`, `Read`, or `Edit`.
+The difference is where the execution happens: built-in tools run inside Claude Code, MCP tools run in an external process.
+
+=== Three Transport Types
+
+MCP supports three transport mechanisms.
+The transport determines how the client and server communicate.
+
+[cols="1,2,3",options="header"]
+|===
+|Transport |Mechanism |When to Use
+
+|`stdio`
+|Server runs as a local subprocess. Client communicates via standard input/output.
+|Most common. Local tools, file access, scripts. No network required. The server starts when Claude Code starts and dies when Claude Code exits.
+
+|`http`
+|Server runs as a remote HTTP service. Client sends requests over the network.
+|Shared services, cloud APIs, team-wide servers. The server runs independently of Claude Code.
+
+|`sse`
+|Server-Sent Events over HTTP. Client receives streaming updates.
+|Streaming data, real-time connections, long-running operations where incremental results matter.
+|===
+
+For local development, `stdio` is almost always what you want.
+The server is a subprocess that Claude Code manages directly -- no ports to configure, no network to debug.
+
+=== Configuration Scopes
+
+MCP servers are registered in configuration files.
+Three scopes control where a server is visible:
+
+==== Project scope: `.mcp.json`
+
+Committed to git. Shared with the team. Every developer who clones the repository gets the same MCP servers.
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "npx",
+      "args": ["@anthropic-ai/mcp-fetch"]
+    }
+  }
+}
+----
+
+==== User scope: `~/.claude.json`
+
+Personal, global. Available in every project. Not committed to any repository.
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "my-private-server": {
+      "command": "python",
+      "args": ["-m", "my_server"]
+    }
+  }
+}
+----
+
+==== Local scope: `.claude/settings.local.json`
+
+Per-project personal overrides. Not committed to git (the `.claude/` directory is typically gitignored). Use this when you need a server for a specific project but do not want to impose it on the team.
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "local-db": {
+      "command": "npx",
+      "args": ["@anthropic-ai/mcp-postgres", "postgresql://localhost/dev"]
+    }
+  }
+}
+----
+
+The scoping model mirrors what you learned about `CLAUDE.md` in Module 2 and settings in Module 4: project-level for the team, user-level for personal preferences, local-level for per-project personal overrides.
+
+=== Adding Servers
+
+Three methods to register an MCP server:
+
+==== CLI command
+
+The most common way. Claude Code writes the configuration for you.
+
+[source,bash]
+----
+claude mcp add <name> -- <command> [args...]
+----
+
+Example:
+
+[source,bash]
+----
+claude mcp add fetch -- npx @anthropic-ai/mcp-fetch
+----
+
+This writes the entry into `.mcp.json` in the current project.
+
+==== Config file with `--mcp-config`
+
+Point Claude Code at a JSON file containing server definitions:
+
+[source,bash]
+----
+claude --mcp-config /path/to/servers.json
+----
+
+Useful for CI/CD or when loading a shared configuration from outside the project.
+
+==== Interactive panel
+
+Inside a Claude Code session, type `/mcp` to open the MCP management panel.
+From there you can add, remove, enable, disable, and reconnect servers interactively.
+
+=== Tool Naming Convention
+
+MCP tools follow a strict naming pattern:
+
+----
+mcp__<server-name>__<tool-name>
+----
+
+The double-underscore separators make MCP tools visually distinct from built-in tools.
+
+Example: if you register a server named `weather` that exposes a tool called `forecast`, Claude sees it as:
+
+----
+mcp__weather__forecast
+----
+
+This naming convention serves three purposes:
+
+1. *Disambiguation.* Multiple servers can expose tools with the same name. The server prefix prevents collisions.
+2. *Discovery.* Claude sees all available MCP tools in its tool list alongside built-in tools. The `mcp__` prefix tells Claude (and you) that a tool call will go to an external server.
+3. *Permission targeting.* You can write permission rules that match specific MCP tools using glob patterns: `mcp__weather__*` allows all tools from the weather server.
+
+=== Safety Model
+
+MCP tools are not automatically trusted.
+Even if a server is registered and running, Claude Code applies the same permission model you learned in Module 4:
+
+* *Claude prompts before calling any MCP tool.* Every MCP tool call triggers a permission check. The user sees what tool is being called, with what arguments, and must approve.
+* *Permission rules can allow or deny specific MCP tools.* You can add `mcp__fetch__fetch` to your `allowlist` in `.claude/settings.json` to auto-approve it. Or deny `mcp__dangerous__*` to block all tools from a specific server.
+* *MCP tools are not auto-approved by default.* Even if you have broad allowlist rules for built-in tools, MCP tools require explicit approval unless you add them to your permission rules.
+
+This is deliberately conservative.
+An MCP server is external code running on your system.
+The permission model ensures you see what it does before it does it.
+
+=== Server Lifecycle
+
+MCP servers have a lifecycle managed by Claude Code:
+
+* *Startup:* Servers registered in configuration files start when Claude Code starts a session. `stdio` servers are spawned as child processes. `http` and `sse` servers connect to existing endpoints.
+* *Health checking:* Claude Code monitors server health. If a server crashes or disconnects, it appears as unhealthy in the `/mcp` panel.
+* *Reconnection:* You can reconnect a failed server from the `/mcp` panel without restarting your Claude Code session.
+* *Shutdown:* When the Claude Code session ends, `stdio` servers are terminated. Remote servers (`http`, `sse`) remain running independently.
+
+The `/mcp` command is your control panel for server lifecycle:
+
+* View status of all registered servers (running, stopped, error)
+* Enable or disable individual servers
+* Reconnect a server that has disconnected
+* Add or remove servers
+
+'''
+
+== Part 2: See It In Action
+
+=== Exercise 1: Add a Public MCP Server
+
+Add the Anthropic fetch server, which provides a tool for fetching web content:
+
+[source,bash]
+----
+claude mcp add fetch -- npx @anthropic-ai/mcp-fetch
+----
+
+Start a Claude Code session and use the new tool:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Inside the session, type:
+
+----
+Fetch the contents of https://httpbin.org/get
+----
+
+Observe what happens:
+
+1. Claude decides to use the `mcp__fetch__fetch` tool (not the built-in `Bash` tool with `curl`).
+2. A permission prompt appears asking you to approve the MCP tool call. The prompt shows the tool name (`mcp__fetch__fetch`), the server (`fetch`), and the arguments (the URL).
+3. After you approve, the fetch server retrieves the URL and returns the content.
+4. Claude presents the result.
+
+This is the MCP flow in action: Claude reasons about available tools, selects the MCP tool, asks for permission, delegates to the server, and processes the result.
+
+=== Exercise 2: Examine Configuration
+
+After adding the fetch server, look at the configuration file it created:
+
+[source,bash]
+----
+cat ~/learnpath/.mcp.json
+----
+
+You should see:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "npx",
+      "args": ["@anthropic-ai/mcp-fetch"]
+    }
+  }
+}
+----
+
+This is a project-scoped configuration. It will be visible to anyone who clones the repository (if committed to git).
+
+Compare this to a user-scoped configuration. Check your global config:
+
+[source,bash]
+----
+cat ~/.claude.json
+----
+
+If you had added the server with `claude mcp add --scope user fetch -- npx @anthropic-ai/mcp-fetch`, the entry would appear in `~/.claude.json` instead of `.mcp.json`.
+
+The JSON structure is identical. Only the file location -- and therefore the visibility scope -- differs.
+
+=== Exercise 3: Server Management
+
+Inside a Claude Code session, use the management panel:
+
+----
+/mcp
+----
+
+You should see the `fetch` server listed with its status (running, stopped, or error).
+
+Try these operations:
+
+1. *Disable the server:* Select the fetch server and disable it. Now ask Claude to fetch a URL -- it will not have the MCP tool available and will fall back to using `Bash` with `curl`.
+2. *Re-enable the server:* Enable it again and verify the `mcp__fetch__fetch` tool reappears.
+3. *Remove the server:* Exit the session and remove it from the CLI:
+
+[source,bash]
+----
+claude mcp remove fetch
+----
+
+Verify the `.mcp.json` file no longer contains the `fetch` entry.
+
+=== Exercise 4: MCP in Transcripts
+
+Run a task that uses the MCP tool and review the transcript:
+
+[source,bash]
+----
+# Re-add the fetch server
+claude mcp add fetch -- npx @anthropic-ai/mcp-fetch
+
+# Run a task in print mode to generate a transcript
+claude "Fetch https://httpbin.org/headers and tell me what user-agent was sent"
+----
+
+Review the session transcript (using `claude-code-transcripts` if installed, or checking `~/.claude/projects/` for raw session data).
+
+In the transcript, look for:
+
+* *Tool name:* `mcp__fetch__fetch` -- the double-underscore convention marking this as an MCP tool
+* *Arguments:* The URL and any options passed to the fetch tool
+* *Result:* The response body returned by the fetch server
+* *Permission prompt:* Where the user was asked to approve the tool call
+
+Compare this to a built-in tool call in the same transcript (e.g., a `Read` or `Bash` call).
+The structure is identical -- tool name, arguments, result -- but the naming convention and permission behavior differ.
+
+'''
+
+== Part 3: Build With It
+
+You will build a custom MCP server that connects Claude Code to RSS feeds and your `{project-name}` API.
+When complete, Claude will be able to search RSS feeds for learning resources and ingest them directly into your learnpath application -- all through MCP tool calls.
+
+=== Step 1: Create the MCP Server Project
+
+Set up a new Python project for the MCP server:
+
+[source,bash]
+----
+mkdir -p ~/learnpath-mcp/src/learnpath_mcp
+----
+
+Create the project configuration:
+
+.~/learnpath-mcp/pyproject.toml
+[source,toml]
+----
+[project]
+name = "learnpath-mcp"
+version = "0.1.0"
+description = "MCP server for learnpath feed ingestion"
+requires-python = ">={python-version}"
+dependencies = [
+    "fastmcp>=2.0.0",
+    "httpx>=0.27.0",
+    "feedparser>=6.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+----
+
+Create the package init file:
+
+.~/learnpath-mcp/src/learnpath_mcp/__init__.py
+[source,python]
+----
+"""Learnpath MCP server for feed ingestion."""
+----
+
+=== Step 2: Implement the Server
+
+Build the MCP server using FastMCP.
+FastMCP is a Python framework for building MCP servers with minimal boilerplate -- you define tools as decorated functions.
+
+.~/learnpath-mcp/src/learnpath_mcp/server.py
+[source,python]
+----
+"""MCP server that searches RSS feeds and ingests assets into the learnpath API."""
+
+from __future__ import annotations
+
+import feedparser
+import httpx
+from fastmcp import FastMCP
+
+LEARNPATH_API = "http://localhost:8000"
+
+mcp = FastMCP(
+    "learnpath-feeds",
+    instructions=(
+        "Search RSS/Atom feeds for learning resources and ingest them "
+        "into the learnpath API. Use search_feed to find articles matching "
+        "a query, list_feed to browse recent items, and ingest_asset to "
+        "save a resource to the learnpath application."
+    ),
+)
+
+
+@mcp.tool()
+def list_feed(url: str, limit: int = 10) -> list[dict]:
+    """List recent items from an RSS or Atom feed.
+
+    Args:
+        url: The URL of the RSS or Atom feed.
+        limit: Maximum number of items to return (default 10).
+
+    Returns:
+        A list of feed items with title, link, and published date.
+    """
+    feed = feedparser.parse(url)
+    items = []
+    for entry in feed.entries[:limit]:
+        items.append(
+            {
+                "title": entry.get("title", ""),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", ""),
+                "summary": entry.get("summary", "")[:200],
+            }
+        )
+    return items
+
+
+@mcp.tool()
+def search_feed(url: str, query: str) -> list[dict]:
+    """Search an RSS or Atom feed for items matching a query.
+
+    Performs case-insensitive substring matching against the title
+    and summary of each feed item.
+
+    Args:
+        url: The URL of the RSS or Atom feed.
+        query: The search term to match against titles and summaries.
+
+    Returns:
+        A list of matching feed items with title, link, and published date.
+    """
+    feed = feedparser.parse(url)
+    query_lower = query.lower()
+    matches = []
+    for entry in feed.entries:
+        title = entry.get("title", "")
+        summary = entry.get("summary", "")
+        if query_lower in title.lower() or query_lower in summary.lower():
+            matches.append(
+                {
+                    "title": title,
+                    "link": entry.get("link", ""),
+                    "published": entry.get("published", ""),
+                    "summary": summary[:200],
+                }
+            )
+    return matches
+
+
+@mcp.tool()
+def ingest_asset(
+    title: str,
+    url: str,
+    asset_type: str,
+    topic: str,
+    notes: str = "",
+) -> dict:
+    """Create a new asset in the learnpath API.
+
+    Posts to the learnpath application's asset endpoint to save
+    a learning resource.
+
+    Args:
+        title: The title of the learning resource.
+        url: The URL of the resource.
+        asset_type: The type of asset (e.g., "article", "video", "tutorial").
+        topic: The topic or category for the asset.
+        notes: Optional notes about why this resource is useful.
+
+    Returns:
+        The created asset record from the API, or an error message.
+    """
+    payload = {
+        "title": title,
+        "url": url,
+        "asset_type": asset_type,
+        "topic": topic,
+        "notes": notes,
+    }
+    with httpx.Client() as client:
+        response = client.post(f"{LEARNPATH_API}/assets/", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+if __name__ == "__main__":
+    mcp.run()
+----
+
+The server exposes three tools:
+
+* `list_feed` -- browse recent items from any RSS/Atom feed
+* `search_feed` -- filter feed items by a search term
+* `ingest_asset` -- POST a new asset to your learnpath API
+
+Each tool is a plain Python function with type hints and a docstring.
+FastMCP uses the type hints to generate the MCP input schema and the docstring to generate the tool description.
+Claude reads these descriptions to decide when and how to call each tool.
+
+=== Step 3: Install Dependencies
+
+[source,bash]
+----
+cd ~/learnpath-mcp
+uv sync
+----
+
+Verify the server starts without errors:
+
+[source,bash]
+----
+uv run python -m learnpath_mcp.server
+----
+
+The server should start and wait for MCP client connections on stdin.
+Press `Ctrl+C` to stop it.
+
+=== Step 4: Register with the Learnpath Project
+
+Add the MCP server to your learnpath project configuration.
+Create or update `~/learnpath/.mcp.json`:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "learnpath-feeds": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory", "/absolute/path/to/learnpath-mcp",
+        "python", "-m", "learnpath_mcp.server"
+      ]
+    }
+  }
+}
+----
+
+[IMPORTANT]
+====
+Replace `/absolute/path/to/learnpath-mcp` with the actual absolute path to your `~/learnpath-mcp` directory (e.g., `/home/youruser/learnpath-mcp` or `/Users/youruser/learnpath-mcp`).
+MCP server paths must be absolute -- relative paths will fail because the server subprocess may not inherit the expected working directory.
+====
+
+The configuration tells Claude Code:
+
+* Server name: `learnpath-feeds` -- this becomes the middle segment in tool names (`mcp__learnpath-feeds__*`)
+* Command: `uv` -- use the uv package manager to run the server
+* Args: run the `learnpath_mcp.server` module from the specified directory
+
+Because this is in `.mcp.json` at the project root, the server is available to anyone working on the learnpath project.
+
+=== Step 5: Use It from Claude Code
+
+Make sure your learnpath API is running in another terminal:
+
+[source,bash]
+----
+cd ~/learnpath
+uv run uvicorn main:app --reload
+----
+
+Start a Claude Code session in the learnpath project:
+
+[source,bash]
+----
+cd ~/learnpath
+claude
+----
+
+Verify the MCP server is connected:
+
+----
+/mcp
+----
+
+You should see `learnpath-feeds` listed with status "running."
+
+Now use the tools through natural language:
+
+----
+Use the learnpath-feeds server to list the 5 most recent items from the Python blog RSS feed at https://blog.python.org/feeds/posts/default?alt=rss
+----
+
+Claude will call `mcp__learnpath-feeds__list_feed` with the URL and limit.
+Approve the permission prompt to see the results.
+
+Next, search for specific content:
+
+----
+Search the Python blog feed for articles about releases
+----
+
+Claude will call `mcp__learnpath-feeds__search_feed` with the URL and query "releases."
+
+Finally, ingest a result into your API:
+
+----
+Ingest the most interesting result as an asset with topic "python" and type "article"
+----
+
+Claude will call `mcp__learnpath-feeds__ingest_asset`, posting to your learnpath API.
+
+=== Step 6: Transcript Review
+
+After the session, review the transcript to see the full MCP flow.
+
+Look for these elements in the session data:
+
+* *Tool selection:* Claude chose `mcp__learnpath-feeds__search_feed` over alternatives like using `Bash` with `curl` to fetch the feed directly. The MCP tool was selected because it provides structured, filtered results.
+* *Permission prompts:* Each MCP tool call triggered a separate permission prompt. Compare this to built-in tools -- if you have `Bash` in your allowlist, shell commands run without prompting. MCP tools do not inherit that allowlist unless you explicitly add them.
+* *Tool arguments:* The MCP tool received typed arguments (URL as string, limit as integer) that match the function signatures in your server code.
+* *Tool results:* The server returned structured data (list of dicts) that Claude could reason about for the next step.
+
+The key observation: from Claude's perspective, MCP tools are just tools.
+The agentic loop, context assembly, and tool dispatch work exactly the same way.
+MCP extends what tools are _available_, not how tool dispatch _works_.
+
+Compare the permission model to direct API calls:
+
+[cols="1,2,2",options="header"]
+|===
+|Aspect |Direct `Bash` + `curl` |MCP Tool
+
+|Permission
+|Covered by `Bash` allowlist -- if `Bash` is allowed, any `curl` command runs
+|Each MCP tool requires its own permission approval or allowlist entry
+
+|Visibility
+|The full `curl` command is visible, but you must parse it to understand what it does
+|The tool name and typed arguments are structured and self-documenting
+
+|Error handling
+|Raw HTTP response -- Claude must parse status codes and error bodies
+|Server handles errors and returns structured results
+
+|Reusability
+|One-off commands -- each `curl` invocation is independent
+|Server maintains state and can be reused across sessions and projects
+|===
+
+'''
+
+[IMPORTANT.checkpoint]
+====
+*What you should have:*
+
+* Custom MCP server (`~/learnpath-mcp`) running with three tools: `list_feed`, `search_feed`, `ingest_asset`
+* Server registered in `~/learnpath/.mcp.json` and visible in the `/mcp` panel
+* Successfully searched an RSS feed and ingested at least one asset into the learnpath API via MCP tool calls
+* Reviewed a transcript showing MCP tool names, arguments, results, and permission prompts
+
+*Understanding check:* You should be able to:
+
+1. Explain what MCP is and how the client-server relationship works
+2. Choose the correct transport type for a given use case (stdio for local, http for remote, sse for streaming)
+3. Decide which configuration scope to use for an MCP server (project, user, or local)
+4. Read an MCP tool name (`mcp__server__tool`) and identify the server and tool
+5. Explain why MCP tools require separate permission approval from built-in tools
+6. Build a new MCP server using FastMCP with typed tool functions
+====
+
+== References
+
+* {claude-code-docs-url}[Claude Code Official Documentation]
+* https://modelcontextprotocol.io[Model Context Protocol Specification]
+* https://github.com/jlowin/fastmcp[FastMCP] -- Python framework for building MCP servers
+* https://github.com/modelcontextprotocol/servers[Community MCP Servers] -- reference implementations and integrations
+
+'''
+
+Next: xref:09-multi-agent.adoc[Module 9: Multi-Agent Patterns]

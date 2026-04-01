@@ -1,0 +1,21 @@
+* xref:index.adoc[Course Overview]
+* xref:00-prerequisites.adoc[Prerequisites]
+
+.Foundations
+* xref:01-agentic-loop.adoc[Module 1: The Agentic Loop]
+* xref:02-context-memory.adoc[Module 2: Context & Memory]
+* xref:03-tools-dispatch.adoc[Module 3: Tools & Tool Dispatch]
+* xref:04-permissions-trust.adoc[Module 4: Permissions & Trust]
+
+.Automation & Extension
+* xref:05-hooks-lifecycle.adoc[Module 5: Hooks & Lifecycle]
+* xref:06-skills-workflows.adoc[Module 6: Skills & Workflows]
+* xref:07-extending-claude-code.adoc[Module 7: Extending Claude Code]
+
+.Advanced Patterns
+* xref:08-mcp-servers.adoc[Module 8: MCP Servers]
+* xref:09-multi-agent.adoc[Module 9: Multi-Agent Patterns]
+* xref:10-sdk-integration.adoc[Module 10: SDK & Integration]
+
+.Wrap-Up
+* xref:11-capstone.adoc[Capstone: Putting It All Together]

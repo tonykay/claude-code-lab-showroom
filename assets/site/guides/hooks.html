@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hooks - Claude Code Documentation</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Claude Code</h2>
+    <div class="subtitle">Documentation &middot; Local Mirror</div>
+  </div>
+  <nav>
+<div class="nav-section-title">Getting Started</div>
+<div class="nav-section">
+  <a href="../index.html">Introduction</a>
+  <a href="../quickstart.html">Quickstart</a>
+  <a href="../installation.html">Installation</a>
+</div>
+<div class="nav-section-title">Concepts</div>
+<div class="nav-section">
+  <a href="../concepts/how-it-works.html">How It Works</a>
+  <a href="../concepts/memory-context.html">Memory &amp; Context</a>
+  <a href="../concepts/permissions.html">Permissions</a>
+  <a href="../concepts/tools.html">Tools</a>
+</div>
+<div class="nav-section-title">Configuration</div>
+<div class="nav-section">
+  <a href="../configuration/claudemd.html">CLAUDE.md</a>
+  <a href="../configuration/environment-variables.html">Environment Variables</a>
+  <a href="../configuration/settings.html">Settings</a>
+</div>
+<div class="nav-section-title">Guides</div>
+<div class="nav-section">
+  <a href="authentication.html">Authentication</a>
+  <a href="hooks.html" class="active">Hooks</a>
+  <a href="mcp-servers.html">MCP Servers</a>
+  <a href="multi-agent.html">Multi-Agent</a>
+  <a href="skills.html">Skills</a>
+</div>
+<div class="nav-subsection-title">Commands</div>
+<div class="nav-section">
+  <a href="../reference/commands/overview.html">Overview</a>
+  <a href="../reference/commands/cli-flags.html">CLI Flags</a>
+  <a href="../reference/commands/slash-commands.html">Slash Commands</a>
+</div>
+<div class="nav-subsection-title">Tools</div>
+<div class="nav-section">
+  <a href="../reference/tools/agent.html">Agent &amp; Tasks</a>
+  <a href="../reference/tools/bash.html">Bash</a>
+  <a href="../reference/tools/file-operations.html">File Operations</a>
+  <a href="../reference/tools/search.html">Search</a>
+  <a href="../reference/tools/web.html">Web</a>
+</div>
+<div class="nav-subsection-title">SDK</div>
+<div class="nav-section">
+  <a href="../reference/sdk/overview.html">Overview</a>
+  <a href="../reference/sdk/hooks-reference.html">Hooks Reference</a>
+  <a href="../reference/sdk/permissions-api.html">Permissions API</a>
+</div>
+  </nav>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="breadcrumb">Guides / Hooks</div>
+  </div>
+  <div class="content">
+
+<h1>Hooks</h1>
+<p class="page-desc">Hooks are automated commands that trigger at specific lifecycle events.</p>
+
+<h2>Exit Codes</h2>
+<ul>
+  <li><strong>0</strong> = success</li>
+  <li><strong>2</strong> = block/inject</li>
+  <li><strong>other</strong> = error to user</li>
+</ul>
+
+<h2>Events</h2>
+<table>
+  <thead><tr><th>Event</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>PreToolUse</code></td><td>Before tool execution; exit 2 blocks</td></tr>
+    <tr><td><code>PostToolUse</code></td><td>After successful tools; formatters/linters</td></tr>
+    <tr><td><code>Stop</code></td><td>Before Claude concludes; exit 2 continues conversation</td></tr>
+    <tr><td><code>SessionStart</code></td><td>At session beginning; inject context</td></tr>
+    <tr><td><code>UserPromptSubmit</code></td><td>On prompt submission; exit 2 blocks</td></tr>
+    <tr><td><code>FileChanged</code></td><td>Monitors file patterns</td></tr>
+  </tbody>
+</table>
+
+<h2>Configuration</h2>
+<p>Use the <code>/hooks</code> command. Lives in settings files (user, project, local).</p>
+
+<h2>Hook Types</h2>
+<ol>
+  <li><strong>Shell command</strong> &mdash; bash/PowerShell with timeout</li>
+  <li><strong>HTTP request</strong> &mdash; POST to endpoints</li>
+  <li><strong>LLM prompt</strong> &mdash; Claude for decision-making</li>
+  <li><strong>Agent hook</strong> &mdash; Full agent with tool access</li>
+</ol>
+
+<h2>Common Uses</h2>
+<ul>
+  <li>Auto-formatting</li>
+  <li>Running tests</li>
+  <li>Logging</li>
+  <li>Blocking dangerous commands</li>
+  <li>Injecting environment variables</li>
+</ul>
+
+<div class="page-nav">
+  <a href="authentication.html" class="prev"><span class="label">Previous</span><span class="title">Authentication</span></a>
+  <a href="mcp-servers.html" class="next"><span class="label">Next</span><span class="title">MCP Servers</span></a>
+</div>
+  </div>
+</div>
+<script>
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+</script>
+</body>
+</html>
